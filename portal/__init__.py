@@ -1407,12 +1407,26 @@ def create_app(instance_path=None):
                     up = request.files.get("file")
                     if not up or not up.filename:
                         raise ValueError("Choose the Chart_of_Accounts.csv from a Zoho Books export.")
-                    items = coa.read_zoho_csv(up.read(5_000_000).decode("utf-8-sig", errors="replace"))
+                    raw = up.read(60_000_000)
+                    usage = None
+                    if up.filename.lower().endswith(".zip") or raw[:2] == b"PK":
+                        try:
+                            text, usage, year = coa.read_zoho_export(raw)
+                        except Exception:
+                            raise ValueError("Couldn't read that .zip; use the export .zip from Zoho Books (or its Chart_of_Accounts.csv).")
+                        if not text:
+                            raise ValueError("That .zip has no Chart_of_Accounts.csv.")
+                    else:
+                        text = raw.decode("utf-8-sig", errors="replace")
+                    items = coa.read_zoho_csv(text)
                     new = coa.import_sources(db(), slug, "zoho", items, user)
                     made = coa.propose(db(), slug, "zoho", items, user)
+                    msg = "Read %d Zoho accounts (%d new); %d clean accounts proposed." % (len(items), new, made)
+                    if usage is not None:
+                        n_used = coa.set_usage(db(), slug, usage, year)
+                        msg += " %d of them were used in %s." % (n_used, year)
                     log("coa_import", user=user, client=slug, rows=len(items), new=new)
-                    flash("Read %d Zoho accounts (%d new); %d clean accounts proposed. Review the type changes and duplicates below." %
-                          (len(items), new, made), "ok")
+                    flash(msg + " Review the type changes and duplicates below.", "ok")
                 elif act == "from-books":
                     cats, banks = coa.sources_from_books(db(), slug)
                     n1 = coa.import_sources(db(), slug, "category", cats, user)
@@ -1472,7 +1486,9 @@ def create_app(instance_path=None):
                 flash(str(e))
             return redirect(url_for("accounts_page", slug=slug, show=request.args.get("show")) + (f.get("anchor") or ""))
         show = request.args.get("show", "issues")
-        return render_template("accounts.html", c=c, show=show, summ=coa.summary(db(), slug), chart=coa.accounts(db(), slug),
+        chart = coa.accounts(db(), slug)
+        return render_template("accounts.html", c=c, show=show, summ=coa.summary(db(), slug), chart=chart,
+                               info={a["full"]: a for a in chart}, usage_year=coa.usage_year(db(), slug),
                                maps=coa.mappings(db(), slug), iss=coa.issues(db(), slug), types=coa.TYPES,
                                editor=editor)
 

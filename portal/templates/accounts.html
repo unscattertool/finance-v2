@@ -1,4 +1,8 @@
 {% extends "base.html" %}
+{% macro tag(n) -%}
+{%- set a = info.get(n) -%}
+{%- if a %} <span class="muted small">({% if a.code %}{{ a.code }} · {% endif %}{% if usage_year %}{% if a.uses %}<b>{{ a.uses }}</b> in {{ usage_year }}{% elif a.last_used %}last used {{ a.last_used }}{% else %}never used{% endif %}{% else %}{{ 'no code' if not a.code else '' }}{% endif %}{% if not a.active %} · inactive{% endif %})</span>{% endif -%}
+{%- endmacro %}
 {% block title %}Chart of accounts · {{ c.name }}{% endblock %}
 {% block heading %}{{ c.name }} · Chart of accounts{% endblock %}
 {% block sub %}<p>The clean chart this client's books use, and how each old account (Zoho, Finance categories, bank feeds) maps to it.</p>{% endblock %}
@@ -25,7 +29,7 @@
   <summary><span>Bring in accounts</span><span class="muted">re-importing keeps your mappings</span></summary>
   <form method="post" enctype="multipart/form-data" class="mini" style="padding:10px 14px">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="import-zoho">
-    <label>Zoho Books chart of accounts (Chart_of_Accounts.csv from a Zoho export) <input type="file" name="file" accept=".csv,text/csv" required></label>
+    <label>Zoho Books export .zip (brings in the chart and how often each account was used this year), or just its Chart_of_Accounts.csv <input type="file" name="file" accept=".zip,.csv,text/csv,application/zip" required></label>
     <button type="submit" class="primary-sm">Import</button>
   </form>
   {% if c.get('books') %}
@@ -55,15 +59,15 @@
   {% if iss.duplicates or iss.same_name or iss.similar %}
   <div class="scroll"><table><tr><th>What</th><th>Accounts</th>{% if editor %}<th>Merge</th>{% endif %}</tr>
   {% for d in iss.duplicates %}{% set fam = d.accounts %}
-    <tr><td>{{ d.family }}</td><td class="small" style="white-space:normal;max-width:420px">{% for a in fam %}{{ a }}{{ ' · ' if not loop.last }}{% endfor %}</td>
+    <tr><td>{{ d.family }}</td><td class="small" style="white-space:normal;max-width:420px">{% for a in fam %}{{ a }}{{ tag(a) }}{{ ' · ' if not loop.last }}{% endfor %}</td>
       {% if editor %}<td>{% include "_merge_form.html" %}</td>{% endif %}</tr>
   {% endfor %}
   {% for d in iss.same_name %}{% set fam = d.accounts %}
-    <tr><td>Same name ({{ types[d.type][0] }})</td><td class="small" style="white-space:normal;max-width:420px">{% for a in fam %}{{ a }}{{ ' · ' if not loop.last }}{% endfor %}</td>
+    <tr><td>Same name ({{ types[d.type][0] }})</td><td class="small" style="white-space:normal;max-width:420px">{% for a in fam %}{{ a }}{{ tag(a) }}{{ ' · ' if not loop.last }}{% endfor %}</td>
       {% if editor %}<td>{% include "_merge_form.html" %}</td>{% endif %}</tr>
   {% endfor %}
   {% for d in iss.similar %}{% set fam = d.plain %}
-    <tr><td>{{ 'Same thing, different name' if d.kind == 'same' else 'Similar names' }}</td><td class="small" style="white-space:normal;max-width:420px">{% for a in d.accounts %}{{ a }}{{ ' · ' if not loop.last }}{% endfor %}</td>
+    <tr><td>{{ 'Same thing, different name' if d.kind == 'same' else 'Similar names' }}</td><td class="small" style="white-space:normal;max-width:420px">{% for a in d.plain %}{{ a }}{{ tag(a) }}{{ ' · ' if not loop.last }}{% endfor %}</td>
       {% if editor %}<td>{% include "_merge_form.html" %}
         <form method="post" class="mini" style="margin-top:4px"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="not-dup"><input type="hidden" name="ids" value="{{ d.ids|join(',') }}"><button type="submit" class="link small">Not the same</button></form></td>{% endif %}</tr>
   {% endfor %}</table></div>
@@ -82,12 +86,13 @@
 <details class="card-sec" open>
   <summary><span>Clean chart</span><span class="muted">{{ chart|length }} accounts</span></summary>
   <div class="scroll"><table class="fin tight">
-    <tr><th>Account</th><th class="hide-sm">Code</th><th>Type</th><th class="n hide-sm">Old accounts</th>{% if editor %}<th></th>{% endif %}</tr>
+    <tr><th>Account</th><th class="hide-sm">Code</th><th>Type</th><th class="n hide-sm">Old accounts</th>{% if usage_year %}<th class="n">Used {{ usage_year }}</th><th class="hide-sm">Last used</th>{% endif %}{% if editor %}<th></th>{% endif %}</tr>
     {% set ns = namespace(cls='') %}
     {% for a in chart %}
-      {% if a.depth == 0 and a.cls != ns.cls %}{% set ns.cls = a.cls %}<tr class="sec"><td colspan="5">{{ {'asset': 'Assets', 'liability': 'Liabilities', 'equity': 'Equity', 'income': 'Income', 'expense': 'Costs and expenses'}.get(a.cls, a.cls) }}</td></tr>{% endif %}
+      {% if a.depth == 0 and a.cls != ns.cls %}{% set ns.cls = a.cls %}<tr class="sec"><td colspan="{{ 7 if usage_year else 5 }}">{{ {'asset': 'Assets', 'liability': 'Liabilities', 'equity': 'Equity', 'income': 'Income', 'expense': 'Costs and expenses'}.get(a.cls, a.cls) }}</td></tr>{% endif %}
     <tr id="a{{ a.id }}" class="{{ '' if a.active else 'muted' }}"><td style="padding-left:{{ 10 + a.depth * 18 }}px">{{ a.name }}{% if not a.active %} <span class="pill soon">inactive</span>{% endif %}</td>
       <td class="hide-sm muted">{{ a.code or '' }}</td><td class="small">{{ a.label }}</td><td class="n hide-sm">{{ a.sources or '' }}</td>
+      {% if usage_year %}<td class="n">{{ a.uses or '' }}</td><td class="hide-sm small muted">{{ a.last_used or '' }}</td>{% endif %}
       {% if editor %}<td><details class="inline"><summary class="btn">Edit</summary>
         <form method="post" class="mini" style="display:grid;gap:6px;min-width:280px">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="save-account"><input type="hidden" name="id" value="{{ a.id }}"><input type="hidden" name="anchor" value="#a{{ a.id }}">

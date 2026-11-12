@@ -77,11 +77,17 @@ def main():
         import io as _io
         page = c.get("/c/crs/accounts").get_data(as_text=True)
         tok = re.search(r'name="csrf_token" value="([^"]+)"', page).group(1)
-        csv_ = b"Account ID,Account Name,Account Type\n1,Rent,Expense\n2,Rent Expense,Expense\n"
-        r = c.post("/c/crs/accounts", data={"csrf_token": tok, "action": "import-zoho", "file": (_io.BytesIO(csv_), "Chart_of_Accounts.csv")},
+        import zipfile as _zf
+        zbuf = _io.BytesIO()
+        with _zf.ZipFile(zbuf, "w") as z:
+            z.writestr("Chart_of_Accounts.csv", "Account ID,Account Name,Account Code,Account Type\n1,Rent,6038,Expense\n2,Rent Expense,,Expense\n")
+            z.writestr("Expense.csv", "Expense Date,Expense Account,Paid Through\n2026-01-05,Rent,\n")
+        zbuf.seek(0)
+        r = c.post("/c/crs/accounts", data={"csrf_token": tok, "action": "import-zoho", "file": (zbuf, "CRS_export.zip")},
                    content_type="multipart/form-data", follow_redirects=True)
         page = r.get_data(as_text=True)
-        assert r.status_code == 200 and "Same thing, different name" in page, page[-2000:]
+        assert r.status_code == 200 and "Same thing, different name" in page and "in 2026" in page, page[-2000:]
+        assert "Used 2026" in c.get("/c/crs/accounts?show=chart").get_data(as_text=True)
         ids = re.search(r'name="action" value="not-dup"><input type="hidden" name="ids" value="([^"]+)"', page).group(1)
         r = c.post("/c/crs/accounts", data={"csrf_token": tok, "action": "not-dup", "ids": ids}, follow_redirects=True)
         assert "Same thing, different name" not in r.get_data(as_text=True)

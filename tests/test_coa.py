@@ -1,4 +1,5 @@
 """Chart of accounts: Zoho import, proposals, type fixes, duplicates, merge, mapping by name. Run: python tests/test_coa.py"""
+import io
 import os
 import sqlite3
 import sys
@@ -71,7 +72,26 @@ def main():
     except ValueError:
         pass
     similar_test()
+    usage_test()
     print("OK")
+
+
+def usage_test():
+    import sqlite3, zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("x/Chart_of_Accounts.csv", "Account ID,Account Name,Account Code,Account Type\n1,Rent,6038,Expense\n2,Rent Expense,,Expense\n3,Bank,,Bank\n")
+        z.writestr("x/Expense.csv", "Expense Date,Expense Account,Paid Through\n2026-01-05,Rent,Bank\n2026-02-05,Rent,Bank\n2025-03-01,Rent Expense,Bank\n")
+    chart, usage, year = coa.read_zoho_export(buf.getvalue())
+    assert year == "2026" and usage["Rent"] == (2, "2026-02-05") and usage["Rent Expense"] == (0, "2025-03-01"), usage
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    items = coa.read_zoho_csv(chart)
+    coa.import_sources(db, "c", "zoho", items, "t")
+    coa.propose(db, "c", "zoho", items, "t")
+    assert coa.set_usage(db, "c", usage, year) == 2
+    acc = {a["full"]: a for a in coa.accounts(db, "c")}
+    assert acc["Rent"]["uses"] == 2 and acc["Rent Expense"]["last_used"] == "2025-03-01" and coa.usage_year(db, "c") == "2026"
 
 
 def similar_test():

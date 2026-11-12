@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS account_map (
   source_parent TEXT, source_code TEXT, source_active INTEGER DEFAULT 1, uses INTEGER,
   account_id INTEGER, status TEXT NOT NULL DEFAULT 'suggested', note TEXT, updated_by TEXT, updated_at TEXT,
   PRIMARY KEY (client, source, source_key));
+CREATE TABLE IF NOT EXISTS coa_meta (client TEXT NOT NULL, key TEXT NOT NULL, value TEXT, PRIMARY KEY (client, key));
 CREATE TABLE IF NOT EXISTS account_not_dup (
   client TEXT NOT NULL, pair TEXT NOT NULL, by_user TEXT, at TEXT, PRIMARY KEY (client, pair));
 """
@@ -74,6 +75,9 @@ PL_GROUP_TYPES = {"Revenue": "income", "Cost of Goods Sold": "cogs", "Labor": "e
 
 def ensure(db):
     db.executescript(SCHEMA)
+    cols = {r[1] for r in db.execute("PRAGMA table_info(account_map)")}
+    if "last_used" not in cols:
+        db.execute("ALTER TABLE account_map ADD COLUMN last_used TEXT")
 
 
 def now():
@@ -310,6 +314,75 @@ def read_zoho_csv(text):
     return out
 
 
+# Zoho Books export: which columns of which file name an account, and the date column
+ZOHO_ACTIVITY = {
+    "Bill": ("Bill Date", ["Account", "Adjustment Account", "Discount Account", "Item Discount Account", "Accounts Payable"]),
+    "Expense": ("Expense Date", ["Expense Account", "Paid Through"]),
+    "Invoice": ("Invoice Date", ["Account", "Accounts Receivable", "Adjustment Account", "Shipping Charge Account"]),
+    "Journal": ("Journal Date", ["Account"]),
+    "Deposit": ("Transaction Date", ["From Account", "To Account"]),
+    "Transfer_Fund": ("Transaction Date", ["From Account", "To Account"]),
+    "Customer_Payment": ("Date", ["Deposit To"]),
+    "Vendor_Payment": ("Date", ["Paid Through"]),
+    "Credit_Note": ("Credit Note Date", ["Account", "Accounts Receivable", "Shipping Charge Account", "Adjustment Account"]),
+    "Sales_Receipt": ("Receipt Date", ["Deposit To", "Account"]),
+    "Vendor_Credits": ("Vendor Credit Date", ["Account", "Accounts Payable", "Discount Account", "Adjustment Account"]),
+    "Inventory_Adjustment": ("Date", ["Account", "Inventory Account"]),
+}
+
+
+def read_zoho_export(data):
+    """A Zoho Books export .zip -> (chart text or None, {account name: (uses since Jan 1 of the latest year, last used)}, year).
+    One line of a transaction counts as one use."""
+    import zipfile
+    z = zipfile.ZipFile(io.BytesIO(data))
+    files = {n.rsplit("/", 1)[-1].lower(): n for n in z.namelist()}
+    chart = z.read(files["chart_of_accounts.csv"]).decode("utf-8-sig", errors="replace") if "chart_of_accounts.csv" in files else None
+    csv.field_size_limit(1 << 30)
+    hits = []  # (name, date)
+    for fname, (dcol, cols) in ZOHO_ACTIVITY.items():
+        n = files.get(fname.lower() + ".csv")
+        if not n:
+            continue
+        with z.open(n) as fh:
+            for r in csv.DictReader(io.TextIOWrapper(fh, encoding="utf-8-sig", errors="replace")):
+                d = (r.get(dcol) or "")[:10]
+                for c in cols:
+                    a = (r.get(c) or "").strip()
+                    if a:
+                        hits.append((a, d))
+    latest = max((d for _, d in hits if re.match(r"\d{4}-\d\d-\d\d", d)), default=dt.date.today().isoformat())
+    year = latest[:4]
+    use, last = collections.Counter(), {}
+    for a, d in hits:
+        if d >= year + "-01-01":
+            use[a] += 1
+        if d > last.get(a, ""):
+            last[a] = d
+    return chart, {a: (use[a], last.get(a) or None) for a in set(use) | set(last)}, year
+
+
+def set_usage(db, client, usage, year):
+    """Store per Zoho account how often it was used this year and when it was last used (from read_zoho_export)."""
+    ensure(db)
+    rows = db.execute("SELECT source_key, source_name FROM account_map WHERE client=? AND source='zoho'", (client,)).fetchall()
+    n = 0
+    for r in rows:
+        u, last = usage.get(r["source_name"], (0, None))
+        db.execute("UPDATE account_map SET uses=?, last_used=? WHERE client=? AND source='zoho' AND source_key=?",
+                   (u, last, client, r["source_key"]))
+        n += 1 if u else 0
+    db.execute("INSERT OR REPLACE INTO coa_meta (client, key, value) VALUES (?, 'usage_year', ?)", (client, year))
+    db.commit()
+    return n
+
+
+def usage_year(db, client):
+    ensure(db)
+    r = db.execute("SELECT value FROM coa_meta WHERE client=? AND key='usage_year'", (client,)).fetchone()
+    return r[0] if r else None
+
+
 def import_sources(db, client, source, items, user):
     """Store/refresh source accounts. Existing mappings are kept (a re-import only updates names/types/usage)."""
     ensure(db)
@@ -418,12 +491,17 @@ def accounts(db, client):
     for r in rows:
         kids[r["parent_id"]].append(r)
     mapped = collections.Counter(r[0] for r in db.execute("SELECT account_id FROM account_map WHERE client=? AND account_id IS NOT NULL", (client,)))
+    used, last = collections.Counter(), {}
+    for r in db.execute("SELECT account_id, uses, last_used FROM account_map WHERE client=? AND account_id IS NOT NULL", (client,)):
+        used[r[0]] += r[1] or 0
+        if r[2] and r[2] > last.get(r[0], ""):
+            last[r[0]] = r[2]
     out = []
 
     def walk(parent, depth):
         for r in sorted(kids.get(parent, []), key=lambda x: (TYPE_ORDER.index(x["type"]) if x["type"] in TYPE_ORDER else 99, x["code"] or "", x["name"].lower())):
             r.update(depth=depth, full=full_name(byid, r), label=TYPES.get(r["type"], (r["type"],))[0], cls=TYPES.get(r["type"], ("", "?"))[1], sources=mapped.get(r["id"], 0),
-                     children=len(kids.get(r["id"], [])))
+                     children=len(kids.get(r["id"], [])), uses=used.get(r["id"], 0), last_used=last.get(r["id"]))
             out.append(r)
             walk(r["id"], depth + 1)
     walk(None, 0)
