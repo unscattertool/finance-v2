@@ -13,7 +13,23 @@
    "push_token_env": "PUSH_TOKEN_WWK",
    "refresh_minutes": 15,
    "days_ahead": 14,
-   "show": {"balance": true, "pending": true, "bills": true, "payroll": true}
+   "show": {
+    "balance": true,
+    "pending": true,
+    "bills": true,
+    "payroll": true
+   }
+  },
+  "crs": {
+   "name": "CRS",
+   "source": "platform",
+   "push_token_env": "PUSH_TOKEN_CRS",
+   "modules": [
+    "sales_tax",
+    "sales",
+    "receivables",
+    "cleanup"
+   ]
   }
  }
 }

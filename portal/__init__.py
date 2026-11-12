@@ -924,6 +924,11 @@ def create_app(instance_path=None):
                 cc["days_ahead"] = max(1, min(60, int(request.form.get("days_ahead", 14))))
             except ValueError:
                 pass
+            if cc.get("source") == "platform":
+                try:
+                    cc["cleanup_since"] = dt.date.fromisoformat(request.form.get("cleanup_since", "")).isoformat()
+                except ValueError:
+                    pass
             _write_json(app, "clients.json", allc)
             if "salaries" in request.form:  # "Name, 50000" per line
                 items = []
@@ -998,6 +1003,8 @@ def create_app(instance_path=None):
     @login_required
     def client_page(slug):
         c = client_or_404(slug)
+        if c.get("source") == "platform":
+            return platform_page(c, None)
         inc = cash_till = None
         if c.get("books") and c.get("shifts_db"):
             tips_run(c)
@@ -1594,6 +1601,18 @@ def create_app(instance_path=None):
     @login_required
     def client_refresh(slug):
         c = client_or_404(slug)
+        if c.get("source") == "platform":
+            if not bank_cfg(c):
+                flash("These numbers are published by Unscatter. They update when a new summary is published.")
+                return redirect(url_for("client_page", slug=slug))
+            last = B.get_meta(db(), slug, "bank_synced_at")
+            if last and time.time() - dt.datetime.fromisoformat(last).timestamp() < 60:
+                flash("Bank synced less than a minute ago.")
+            else:
+                err = bank_sync(c, "manual")
+                log("sync", user=g.user["email"], client=slug, ok=not err)
+                flash(err or "Bank synced.", None if err else "ok")
+            return redirect(request.form.get("next") or url_for("client_page", slug=slug))
         snap = _read_json(app, _snap_name(slug), None)
         if c.get("books"):
             last = B.get_meta(db(), slug, "bank_synced_at")
@@ -1820,8 +1839,123 @@ def create_app(instance_path=None):
     def _400(e):
         return render_template("message.html", msg="That form expired. Go back, reload the page and try again."), 400
 
+    # -------------------------------------------------------------- clients published from the Unscatter platform
+    from . import published as PUB
+    from . import bankview as BV
+
+    def platform_snapshot(slug):
+        return _read_json(app, PUB.file_name(slug), None)
+
+    def platform_bank(c):
+        """Bank figures from SheetLink (books.db) for a platform client, or None if no bank feed is set up."""
+        b = bank_cfg(c)
+        if not b:
+            return None
+        BV.ensure(db())
+        return BV.view(db(), c["slug"], b["accounts"], BV.cleanup_since(c))
+
+    def platform_page(c, page):
+        snap = platform_snapshot(c["slug"])
+        bank = platform_bank(c)
+        pages = PUB.visible_pages(c, snap, has_bank=bank is not None)
+        if page is not None and page not in dict(pages):
+            abort(404)
+        a_ = request.args
+        if page and a_.get("format") == "csv":
+            got = PUB.csv_rows(snap, page, a_.get("table", ""), a_.get("period"), bank=bank)
+            if got is None:
+                abort(404)
+            log("platform_csv", user=g.user["email"], client=c["slug"], page=page, table=a_.get("table"))
+            return _csv("%s-%s-%s" % (c["slug"], a_.get("table") or page, (snap or {}).get("asOf", "")), *got)
+        ctx = dict(c=c, s=snap, pages=pages, page=page, page_title=dict(pages).get(page), args=a_, bank=bank,
+                   admin=is_admin())
+        if snap and page in ("sales", None) and snap.get("sales"):
+            ctx["chart"] = PUB.bars_svg(snap["sales"].get("months") or [])
+        if snap and page == "sales-tax" and snap.get("salesTax"):
+            periods = snap["salesTax"].get("periods") or []
+            detail = snap["salesTax"].get("detail") or {}
+            sel = a_.get("period") if a_.get("period") in detail else (periods[0]["period"] if periods else None)
+            ctx.update(period=sel, period_rows=detail.get(sel) or [],
+                       detail_periods=[p for p in periods if p["period"] in detail])
+        return render_template("platform.html", **ctx)
+
+    @app.template_filter("ym")
+    def ym(v):
+        try:
+            return dt.date(int(str(v)[:4]), int(str(v)[5:7]), 1).strftime("%b %Y")
+        except (TypeError, ValueError):
+            return v or ""
+
+    @app.template_filter("longdate")
+    def longdate(v):
+        try:
+            d = dt.date.fromisoformat(str(v)[:10])
+            return "%s %d, %d" % (d.strftime("%b"), d.day, d.year)
+        except ValueError:
+            return v or ""
+
+    @app.route("/c/<slug>/p/<page>")
+    @login_required
+    def platform_module(slug, page):
+        c = client_or_404(slug)
+        if c.get("source") != "platform":
+            abort(404)
+        return platform_page(c, page)
+
+    @app.route("/c/<slug>/p/cleanup/txn", methods=["POST"])
+    @login_required
+    def platform_bank_note(slug):
+        """Anyone with access to the client can note what a bank transaction was; only Unscatter marks it done."""
+        c = client_or_404(slug)
+        if c.get("source") != "platform" or not bank_cfg(c):
+            abort(404)
+        BV.ensure(db())
+        tid, action = request.form.get("txn_id", ""), request.form.get("action", "note")
+        user = g.user["email"]
+        if action == "note":
+            ok = BV.save_note(db(), slug, tid, request.form.get("note", ""), user)
+        elif action in ("done", "undo") and is_admin():
+            ok = BV.set_done(db(), slug, tid, action == "done", user)
+        else:
+            abort(404)
+        log("bank_note", user=user, client=slug, txn=tid, action=action, ok=ok)
+        flash("Saved." if ok else "That transaction wasn't found.", "ok" if ok else None)
+        return redirect(url_for("platform_module", slug=slug, page="cleanup") + "#t-" + tid)
+
+    @app.route("/api/<slug>/platform", methods=["POST"])
+    def platform_push(slug):
+        """The Unscatter platform's "Publish to portal" button sends the client's summary here."""
+        c = clients().get(slug)
+        token = os.environ.get((c or {}).get("push_token_env", ""), "")
+        sent = request.headers.get("Authorization", "")
+        sent = (sent[7:] if sent.startswith("Bearer ") else sent).strip()
+        if not c or c.get("source") != "platform" or len(token) < 24 or not hmac.compare_digest(sent, token):
+            abort(401)
+        if (request.content_length or 0) > PUB.MAX_COMPRESSED:
+            return jsonify(ok=False, error="too large"), 413
+        try:
+            snap = PUB.parse_upload(request.get_data(cache=False), request.headers.get("Content-Encoding"))
+        except PUB.Rejected as e:
+            return jsonify(ok=False, error=str(e)), e.code
+        with _lock:
+            PUB.keep_previous(app.instance_path, slug)
+            snap["receivedAt"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+            _write_json(app, PUB.file_name(slug), snap)
+        log("platform_publish", client=slug, modules=snap.get("modules"), asOf=snap.get("asOf"))
+        return jsonify(ok=True, receivedAt=snap["receivedAt"])
+
     # used by `manage.py sync` (daily job)
     def _daily(slug):
+        if clients()[slug].get("source") == "platform":  # summary is published by hand; only the bank is pulled
+            c = dict(clients()[slug], slug=slug)
+            err = bank_sync(c, "daily") if bank_cfg(c) else None
+            out = dict(platform_snapshot(slug) or {"note": "nothing published yet"})
+            if err:
+                out["refreshError"] = err
+            elif bank_cfg(c):
+                out["bankSource"] = "SheetLink"
+                B.backup(db(), app.instance_path)
+            return out
         s = get_snapshot(dict(clients()[slug], slug=slug), force=True, by="daily")
         if clients()[slug].get("books"):
             B.backup(db(), app.instance_path)

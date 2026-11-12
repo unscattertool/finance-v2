@@ -18,6 +18,10 @@
   {% else %}
   {% for a in chosen %}<input type="hidden" name="accounts" value="{{ a }}">{% endfor %}
   {% endif %}
+  {% if c.get('source') == 'platform' %}
+  <label>Cleanup list starts <input type="date" name="cleanup_since" value="{{ c.get('cleanup_since', '') }}"></label>
+  <p class="hint">Bank transactions from this date on show on the Cleanup page until you mark them done. Blank = the last 90 days.</p>
+  {% endif %}
   <label>Show bills due within (days) <input type="number" name="days_ahead" min="1" max="60" value="{{ c.get('days_ahead', 14) }}"></label>
   {% if salaries is not none %}
   <strong>Salaried pay (not on the POS time clock)</strong>

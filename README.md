@@ -59,6 +59,24 @@ Changes take effect right away; no restart is needed. Sign-ins and failed attemp
    - **No Microsoft connection at all:** set `"source": "push"` and `"push_token_env": "PUSH_TOKEN_CLIENTB"`. A Power Automate flow then sends the "Export Snapshot" script result to `https://finance.unscatterllc.com/api/<id>/snapshot` with header `Authorization: Bearer <token>`.
 3. `"show"` hides sections per client, e.g. `{"payroll": false}`.
 
+## Clients published from the Unscatter platform (e.g. CRS)
+
+For clients whose books are in Zoho, the Unscatter platform (on Tammy's PC) builds the summary and sends it here when someone clicks **Publish to portal** on its Finance Portal screen. The portal never connects to Zoho for these clients.
+
+1. Make a push token: `python manage.py new-secret`. Add it as an environment variable, e.g. `PUSH_TOKEN_CRS` (Setup Python App → Environment variables).
+2. Add the client to `instance/clients.json`:
+   ```json
+   "crs": {"name": "CRS", "source": "platform", "push_token_env": "PUSH_TOKEN_CRS",
+           "modules": ["sales_tax", "sales", "receivables", "cleanup"]}
+   ```
+   `modules` is optional; leave one out to hide that page even if it was published.
+3. In the platform: Connected Systems → Finance Portal → Portal settings: address `https://finance.unscatterllc.com`, client id `crs`, the same token. Build preview, check it, Publish.
+4. Give the client's people access: `python manage.py add-user name@crs.com --name "Name" --clients crs --microsoft-only`.
+
+**Bank from SheetLink.** In Client settings (admin), pick the client's bank account(s) from SheetLink (key name e.g. `SHEETLINK_KEY_WWK` if it's the same SheetLink account) and the date the cleanup list starts. The portal then syncs that bank every morning (and with **Sync bank now** on the Bank tab), shows balance, pending and recent transactions, and lists every posted transaction since the start date on the Cleanup tab. The client's people add a note saying what each one was; Unscatter records it in Zoho and clicks **Done**. Notes live in `bank_note` in `books.db`.
+
+Published summaries are stored as `instance/platform_<id>.json` (the previous one as `.prev.json`). Pages: Overview, Sales tax, Sales, Unpaid invoices, Cleanup, each with CSV downloads. The daily `sync` skips these clients.
+
 ## Linking from the shifts site
 
 Ask ChatGPT to add a "Finance" link to `https://finance.unscatterllc.com`, or an embedded panel:

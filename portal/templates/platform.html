@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+{% macro pill(status) -%}
+{%- set st = (status or '')|lower -%}
+<span class="pill {{ 'ok' if st in ('reconciled', 'matched') else 'late' if 'overdue' in st or 'missing' in st else 'soon' }}">{{ status }}</span>
+{%- endmacro %}
+{% macro csv(table, label='Download CSV', period=None) -%}
+<a class="small" href="{{ url_for('platform_module', slug=c.slug, page=page, format='csv', table=table, period=period) }}">{{ label }}</a>
+{%- endmacro %}
+{% block title %}{{ c.name }}{% if page_title %} · {{ page_title }}{% endif %}{% endblock %}
+{% block heading %}{{ c.name }}{% if page_title %} · {{ page_title }}{% else %} · at a glance{% endif %}{% endblock %}
+{% block sub %}<p>{% if s %}Published by Unscatter {{ s.receivedAt|when }} · numbers as of {{ s.asOf|longdate }}{% endif %}{% if s and bank %} · {% endif %}{% if bank %}bank synced {{ bank.syncedAt|when or 'not yet' }}{% endif %}</p>{% endblock %}
+{% block body %}
+{% if not s %}
+  <div class="warn">Nothing has been published for {{ c.name }} yet. Unscatter will publish your first summary soon.</div>
+{% endif %}
+{% if s or bank %}
+{% set s = s or {} %}
+<nav class="tabs no-print">
+  <a href="{{ url_for('client_page', slug=c.slug) }}" class="{{ 'on' if not page }}">Overview</a>
+  {% for name, title in pages %}<a href="{{ url_for('platform_module', slug=c.slug, page=name) }}" class="{{ 'on' if page == name }}">{{ title }}</a>{% endfor %}
+</nav>
+
+{# ============================================================ overview #}
+{% if not page %}
+  {% set names = pages|map('first')|list %}
+  <div class="tiles">
+  {% if 'sales-tax' in names and s.salesTax %}{% set t = s.salesTax %}{% set p0 = t.periods[0] if t.periods else None %}
+    <a class="tile tile-link" href="{{ url_for('platform_module', slug=c.slug, page='sales-tax') }}"><div class="k">Sales tax · {{ p0.period|ym if p0 else '—' }}</div>
+      <div class="v">{{ p0.liability|money if p0 else '—' }}</div>
+      <div class="s">{% if p0 %}{{ pill(p0.status) }} {% if p0.due %}due {{ p0.due|mdy }}{% endif %}{% endif %}{% if t.exceptionsOpen %} · {{ t.exceptionsOpen }} open issue{{ '' if t.exceptionsOpen == 1 else 's' }}{% endif %}</div></a>
+  {% endif %}
+  {% if 'sales' in names and s.sales %}{% set m = s.sales.months[-1] if s.sales.months else None %}
+    <a class="tile tile-link" href="{{ url_for('platform_module', slug=c.slug, page='sales') }}"><div class="k">Sales · last 12 months</div>
+      <div class="v">{{ s.sales.last12|money }}</div>
+      <div class="s">{% if m %}{{ m.month|ym }} so far {{ m.sales|money }}{% endif %}{% if s.sales.openOrdersCount %} · {{ s.sales.openOrdersCount }} open order{{ '' if s.sales.openOrdersCount == 1 else 's' }}{% endif %}</div></a>
+  {% endif %}
+  {% if 'receivables' in names and s.receivables %}{% set r = s.receivables %}
+    <a class="tile tile-link" href="{{ url_for('platform_module', slug=c.slug, page='receivables') }}"><div class="k">Unpaid invoices</div>
+      <div class="v">{{ r.total|money }}</div>
+      <div class="s">{% if r.pastDueTotal %}<span class="neg">{{ r.pastDueTotal|money }} past due</span> · {{ r.pastDueCount }} invoice{{ '' if r.pastDueCount == 1 else 's' }}{% else %}Nothing past due{% endif %}</div></a>
+  {% endif %}
+  {% if 'bank' in names and bank %}
+    <a class="tile tile-link" href="{{ url_for('platform_module', slug=c.slug, page='bank') }}"><div class="k">Bank balance</div>
+      <div class="v {{ 'neg' if bank.current < 0 }}">{{ bank.current|money }}</div>
+      <div class="s">Available {{ bank.available|money }}{% if bank.pending %} · {{ bank.pending|length }} pending {{ bank.pendingTotal|money }}{% endif %}</div></a>
+  {% endif %}
+  {% if 'cleanup' in names and (bank or s.cleanup) %}{% set b = (s.cleanup or {}).bank %}{% set coa = (s.cleanup or {}).coa %}
+    <a class="tile tile-link" href="{{ url_for('platform_module', slug=c.slug, page='cleanup') }}"><div class="k">Cleanup</div>
+      <div class="v">{{ bank.todo|length if bank else (b.uncategorizedCount if b and not b.error else '—') }}</div>
+      <div class="s">bank transactions to sort out{% if bank and bank.todoNoted %} ({{ bank.todoNoted }} with notes){% endif %}{% if coa and coa.issues %}{% set nacc = coa.issues|map(attribute='account')|unique|list|length %} · {{ nacc }} account{{ '' if nacc == 1 else 's' }} to review{% endif %}</div></a>
+  {% endif %}
+  </div>
+  {% if 'sales' in names and s.sales and chart %}
+  <section><h2>Sales by month <span>before tax</span></h2>
+    <div class="chartbox">{{ chart|safe }}</div>
+  </section>
+  {% endif %}
+  {% if 'receivables' in names and s.receivables and s.receivables.pastDue %}
+  <section><h2>Most overdue invoices <span><a href="{{ url_for('platform_module', slug=c.slug, page='receivables') }}">See all</a></span></h2>
+    <div class="scroll"><table>
+      <tr><th>Invoice</th><th>Company</th><th class="hide-sm">Location</th><th class="n">Days late</th><th class="n">Balance</th></tr>
+      {% for r in s.receivables.pastDue[:8] %}<tr><td>{{ r.invoice }}</td><td>{{ r.company or '' }}</td><td class="hide-sm">{{ r.location or '' }}</td><td class="n">{{ r.daysLate }}</td><td class="n">{{ r.balance|money }}</td></tr>{% endfor %}
+    </table></div>
+  </section>
+  {% endif %}
+
+{# ============================================================ sales tax #}
+{% elif page == 'sales-tax' %}
+  {% set t = s.salesTax %}
+  <section><h2>Filing periods <span>{{ csv('periods') }}</span></h2>
+    {% if t.periods %}<div class="scroll"><table>
+      <tr><th>Period</th><th class="n">Owed per books</th><th class="n">Filed</th><th class="n hide-sm">Paid</th><th class="n">Difference</th><th class="hide-sm">Due</th><th>Status</th></tr>
+      {% for p in t.periods %}<tr>
+        <td>{% if p.period in (detail_periods|map(attribute='period')|list) %}<a href="?period={{ p.period }}">{{ p.period|ym }}</a>{% else %}{{ p.period|ym }}{% endif %}</td>
+        <td class="n">{{ p.liability|money }}</td><td class="n">{{ p.filed|money }}</td><td class="n hide-sm">{{ p.paid|money }}</td>
+        <td class="n {{ 'neg' if p.variance < -0.02 }}">{{ p.variance|money }}</td><td class="hide-sm">{{ p.due|mdy }}</td>
+        <td>{{ pill(p.status) }}{% if p.missingReturns %} <span class="small muted">{{ p.missingReturns }} missing</span>{% endif %}{% if p.needsReview %} <span class="small muted">{{ p.needsReview }} to review</span>{% endif %}</td></tr>{% endfor %}
+    </table></div>
+    <p class="hint">"Owed per books" is the sales tax recorded on your invoices. "Filed" is what the returns reported. Due dates are the usual state due dates (Colorado: the 20th of the next month).</p>
+    {% else %}<div class="empty">No sales tax periods reconciled yet.</div>{% endif %}
+  </section>
+  {% if period %}
+  <section><h2>{{ period|ym }} by jurisdiction <span>{{ csv('detail', period=period) }}</span></h2>
+    <div class="scroll"><table>
+      <tr><th>Jurisdiction</th><th class="hide-sm">State</th><th class="n">Owed per books</th><th class="n">Filed</th><th class="n hide-sm">Paid</th><th class="n">Difference</th><th>Status</th></tr>
+      {% for r in period_rows %}<tr><td>{{ r.jurisdiction }}{% if r.code %} <span class="small muted">{{ r.code }}</span>{% endif %}</td><td class="hide-sm">{{ r.state or '' }}</td>
+        <td class="n">{{ r.liability|money }}</td><td class="n">{{ r.filed|money if r.filed is not none else '—' }}</td><td class="n hide-sm">{{ r.paid|money if r.paid is not none else '—' }}</td>
+        <td class="n {{ 'neg' if r.variance is not none and r.variance < -0.02 }}">{{ r.variance|money if r.variance is not none else '—' }}</td><td>{{ pill(r.status) }}</td></tr>{% endfor %}
+    </table></div>
+  </section>
+  {% endif %}
+  <section><h2>Open issues <span>{% if t.exceptions %}{{ csv('exceptions') }}{% endif %}</span></h2>
+    {% if t.exceptions %}<div class="scroll"><table>
+      <tr><th>Issue</th><th>Jurisdiction</th><th class="hide-sm">Period</th><th class="n">Amount</th><th class="hide-sm">What to do</th></tr>
+      {% for e in t.exceptions %}<tr><td>{{ e.title }} <span class="pill {{ 'late' if e.severity in ('Critical', 'High', 'Error') else 'soon' }}">{{ e.severity }}</span></td><td>{{ e.jurisdiction or '' }}</td><td class="hide-sm">{{ e.period|ym if e.period else '' }}</td><td class="n">{{ e.amount|money if e.amount is not none else '' }}</td><td class="hide-sm">{{ e.action or '' }}</td></tr>{% endfor %}
+    </table></div>
+    {% if t.exceptionsOpen > t.exceptions|length %}<p class="hint">Showing {{ t.exceptions|length }} of {{ t.exceptionsOpen }}.</p>{% endif %}
+    {% else %}<div class="empty">No open sales tax issues.</div>{% endif %}
+  </section>
+  <p class="src">Liability report imported {{ t.liabilityImportedAt|when or '—' }} · returns imported {{ t.returnsImportedAt|when or '—' }}</p>
+
+{# ============================================================ sales #}
+{% elif page == 'sales' %}
+  {% set sa = s.sales %}
+  <div class="tiles">
+    <div class="tile"><div class="k">Last 12 months</div><div class="v">{{ sa.last12|money }}</div><div class="s">before tax</div></div>
+    {% set m = sa.months[-1] if sa.months else None %}{% set pm = sa.months[-2] if sa.months|length > 1 else None %}
+    {% if m %}<div class="tile"><div class="k">{{ m.month|ym }} so far</div><div class="v">{{ m.sales|money }}</div><div class="s">{{ m.invoices }} invoice{{ '' if m.invoices == 1 else 's' }}{% if pm %} · {{ pm.month|ym }} {{ pm.sales|money }}{% endif %}</div></div>{% endif %}
+    <div class="tile"><div class="k">Open sales orders</div><div class="v">{{ sa.openOrdersTotal|money }}</div><div class="s">{{ sa.openOrdersCount }} order{{ '' if sa.openOrdersCount == 1 else 's' }} not invoiced or not shipped</div></div>
+  </div>
+  <section><h2>Sales by month <span>before tax</span></h2><div class="chartbox">{{ chart|safe }}</div></section>
+  <section><h2>By product <span>last 12 months · {{ csv('products') }}</span></h2>
+    {% if sa.byProduct %}{% set top = (sa.byProduct|map(attribute='sales')|max) or 1 %}<div class="scroll"><table>
+      <tr><th>Product</th><th class="n hide-sm">Quantity</th><th class="n">Sales</th></tr>
+      {% for r in sa.byProduct %}<tr><td><span class="bar" style="width:{{ [((r.sales / top) * 120)|round(0), 0]|max }}px"></span>{{ r.product }}{% if r.sku %} <span class="small muted">{{ r.sku }}</span>{% endif %}</td><td class="n hide-sm">{{ '{:,.0f}'.format(r.qty) }}</td><td class="n">{{ r.sales|money }}</td></tr>{% endfor %}
+    </table></div>{% else %}<div class="empty">No product lines in the last 12 months.</div>{% endif %}
+  </section>
+  <section><h2>By location <span>last 12 months · {{ csv('locations') }}</span></h2>
+    {% if sa.byLocation %}<div class="scroll"><table>
+      <tr><th>Location</th><th>Company</th><th class="hide-sm">Group</th><th class="n hide-sm">Invoices</th><th class="n">Sales</th><th class="hide-sm">Last invoice</th></tr>
+      {% for r in sa.byLocation %}<tr><td>{{ r.location or '—' }}</td><td>{{ r.company or '' }}</td><td class="hide-sm">{{ r.group or '' }}</td><td class="n hide-sm">{{ r.invoices }}</td><td class="n">{{ r.sales|money }}</td><td class="hide-sm">{{ r.last|longdate }}</td></tr>{% endfor %}
+    </table></div>{% else %}<div class="empty">No invoices in the last 12 months.</div>{% endif %}
+  </section>
+  <section><h2>Open sales orders <span>{{ csv('orders') }}</span></h2>
+    {% if sa.openOrders %}<div class="scroll"><table>
+      <tr><th>Order</th><th>Date</th><th>Company</th><th class="hide-sm">Location</th><th class="hide-sm">Status</th><th class="hide-sm">Shipment</th><th class="n">Amount</th></tr>
+      {% for o in sa.openOrders %}<tr><td>{{ o.number }}{% if o.po %} <span class="small muted">PO {{ o.po }}</span>{% endif %}</td><td>{{ o.date|longdate }}</td><td>{{ o.company or '' }}</td><td class="hide-sm">{{ o.location or '' }}</td><td class="hide-sm">{{ o.status or '' }}</td><td class="hide-sm">{{ o.shipment or '' }}</td><td class="n">{{ o.amount|money }}</td></tr>{% endfor %}
+    </table></div>
+    {% if sa.openOrdersCount > sa.openOrders|length %}<p class="hint">Showing the newest {{ sa.openOrders|length }} of {{ sa.openOrdersCount }}.</p>{% endif %}
+    {% else %}<div class="empty">No open sales orders.</div>{% endif %}
+  </section>
+  <p class="src">Invoices imported {{ sa.invoicesImportedAt|when or '—' }} · sales orders imported {{ sa.ordersImportedAt|when or '—' }}</p>
+
+{# ============================================================ receivables #}
+{% elif page == 'receivables' %}
+  {% set r = s.receivables %}
+  <div class="tiles">
+    <div class="tile"><div class="k">Unpaid invoices</div><div class="v">{{ r.total|money }}</div></div>
+    <div class="tile"><div class="k">Past due</div><div class="v {{ 'neg' if r.pastDueTotal > 0 }}">{{ r.pastDueTotal|money }}</div><div class="s">{{ r.pastDueCount }} invoice{{ '' if r.pastDueCount == 1 else 's' }}</div></div>
+  </div>
+  <section><h2>By age</h2>
+    {% set tot = r.total or 1 %}
+    <div class="stack" role="img" aria-label="Unpaid invoices by age">{% for b in r.buckets %}{% if b.amount > 0 %}<i style="width:{{ (b.amount / tot * 100)|round(1) }}%;background:{{ ['#1E9E6A', '#E0A126', '#eb6834', '#D14343', '#8E1F1F'][loop.index0] }}" title="{{ b.label }} {{ b.amount|money }}"></i>{% endif %}{% endfor %}</div>
+    <table><tr><th>Age</th><th class="n">Amount</th></tr>
+      {% for b in r.buckets %}<tr><td><span class="key" style="background:{{ ['#1E9E6A', '#E0A126', '#eb6834', '#D14343', '#8E1F1F'][loop.index0] }}"></span>{{ b.label }}</td><td class="n">{{ b.amount|money }}</td></tr>{% endfor %}
+    </table>
+  </section>
+  <section><h2>By company <span>{{ csv('companies') }}</span></h2>
+    {% if r.byCompany %}<div class="scroll"><table>
+      <tr><th>Company</th><th class="hide-sm">Group</th><th class="n">Not due</th><th class="n">1–30</th><th class="n">31–60</th><th class="n">61–90</th><th class="n">90+</th><th class="n">Total</th></tr>
+      {% for g in r.byCompany %}<tr><td>{{ g.company or '—' }}</td><td class="hide-sm">{{ g.group or '' }}</td><td class="n">{{ g.current|money }}</td><td class="n">{{ g['1_30']|money }}</td><td class="n">{{ g['31_60']|money }}</td><td class="n">{{ g['61_90']|money }}</td><td class="n {{ 'neg' if g['90_plus'] > 0 }}">{{ g['90_plus']|money }}</td><td class="n"><strong>{{ g.total|money }}</strong></td></tr>{% endfor %}
+    </table></div>{% else %}<div class="empty">No unpaid invoices.</div>{% endif %}
+  </section>
+  <section><h2>Past-due invoices <span>{{ csv('past-due') }}</span></h2>
+    {% if r.pastDue %}<div class="scroll"><table>
+      <tr><th>Invoice</th><th>Company</th><th class="hide-sm">Location</th><th class="hide-sm">PO</th><th>Due</th><th class="n">Days late</th><th class="n">Balance</th></tr>
+      {% for i in r.pastDue %}<tr><td>{{ i.invoice }}</td><td>{{ i.company or '' }}</td><td class="hide-sm">{{ i.location or '' }}</td><td class="hide-sm">{{ i.po or '' }}</td><td>{{ i.due|longdate }}</td><td class="n">{{ i.daysLate }}</td><td class="n">{{ i.balance|money }}</td></tr>{% endfor %}
+    </table></div>
+    {% if r.pastDueCount > r.pastDue|length %}<p class="hint">Showing the {{ r.pastDue|length }} most overdue of {{ r.pastDueCount }}.</p>{% endif %}
+    {% else %}<div class="empty">Nothing past due.</div>{% endif %}
+  </section>
+  <p class="src">Invoices imported {{ r.invoicesImportedAt|when or '—' }} · payments imported {{ r.paymentsImportedAt|when or '—' }}. Payments made after that aren't reflected yet.</p>
+
+{# ============================================================ bank (SheetLink) #}
+{% elif page == 'bank' %}
+  <div class="tiles">
+    <div class="tile"><div class="k">Bank balance</div><div class="v {{ 'neg' if bank.current < 0 }}">{{ bank.current|money }}</div><div class="s">Available {{ bank.available|money }}</div></div>
+    <div class="tile"><div class="k">Pending</div><div class="v {{ 'neg' if bank.pendingTotal < 0 }}">{{ bank.pendingTotal|money }}</div><div class="s">{{ bank.pending|length }} item{{ '' if bank.pending|length == 1 else 's' }} not posted yet</div></div>
+  </div>
+  <form method="post" action="{{ url_for('client_refresh', slug=c.slug) }}" class="no-print" style="margin:-8px 0 16px"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="next" value="{{ url_for('platform_module', slug=c.slug, page='bank') }}"><button type="submit">Sync bank now</button> <span class="src">Synced {{ bank.syncedAt|when or 'not yet' }} · also syncs every morning</span></form>
+  {% if bank.accounts|length > 1 %}<section><h2>Accounts</h2><table>
+    <tr><th>Account</th><th class="n">Balance</th><th class="n">Available</th></tr>
+    {% for a in bank.accounts %}<tr><td>{{ a.institution or '' }} {{ a.name }} ••{{ a.mask }}</td><td class="n">{{ a.current|money }}</td><td class="n">{{ a.available|money }}</td></tr>{% endfor %}
+  </table></section>{% endif %}
+  {% if bank.pending %}<section><h2>Pending <span>{{ csv('bank-pending') }}</span></h2><div class="scroll"><table>
+    <tr><th>Date</th><th>Description</th><th class="n">Amount</th></tr>
+    {% for t in bank.pending %}<tr><td>{{ t.date|mdy }}</td><td>{{ t.description }}</td><td class="n {{ 'neg' if t.amount < 0 }}">{{ t.amount|money }}</td></tr>{% endfor %}
+  </table></div></section>{% endif %}
+  <section><h2>Last {{ bank.recentDays }} days <span>{{ csv('bank-recent') }}</span></h2>
+    {% if bank.recent %}<div class="scroll"><table>
+    <tr><th>Date</th><th>Description</th><th class="hide-sm">Account</th><th class="n">Amount</th></tr>
+    {% for t in bank.recent %}<tr><td>{{ t.date|mdy }}</td><td>{{ t.description }}{% if t.check %} <span class="small muted">check {{ t.check }}</span>{% endif %}</td><td class="hide-sm">{{ t.account }}</td><td class="n {{ 'neg' if t.amount < 0 }}">{{ t.amount|money }}</td></tr>{% endfor %}
+    </table></div>{% else %}<div class="empty">No posted transactions in the last {{ bank.recentDays }} days.</div>{% endif %}
+  </section>
+
+{# ============================================================ cleanup #}
+{% elif page == 'cleanup' %}
+  {% set b = (s.cleanup or {}).bank %}{% set coa = (s.cleanup or {}).coa %}
+  {% if bank %}
+  <section><h2>Bank transactions to sort out <span>{{ bank.todo|length }} since {{ bank.since|longdate }}{% if bank.todo %} · {{ csv('bank-todo') }}{% endif %}</span></h2>
+    {% if bank.todo %}
+    <p class="hint">If you know what a transaction was (vendor, what it was for, which location), add a note. Unscatter records it in your books and takes it off this list.</p>
+    <div class="scroll"><table>
+      <tr><th>Date</th><th>Description</th><th class="n">Amount</th><th>Note</th>{% if admin %}<th></th>{% endif %}</tr>
+      {% for t in bank.todo %}<tr id="t-{{ t.id }}"><td>{{ t.date|mdy }}</td>
+        <td>{{ t.description }}{% if t.check %} <span class="small muted">check {{ t.check }}</span>{% endif %}<div class="small muted">{{ t.account }}</div></td>
+        <td class="n {{ 'neg' if t.amount < 0 }}">{{ t.amount|money }}</td>
+        <td style="white-space:normal;min-width:220px">{% if t.note %}<div>{{ t.note }}</div><div class="small muted">{{ t.notedBy }} · {{ t.notedAt|when }}</div>{% endif %}
+          <details class="inline"><summary class="btn">{{ 'Edit note' if t.note else 'Add note' }}</summary>
+            <form method="post" action="{{ url_for('platform_bank_note', slug=c.slug) }}" class="mini"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="txn_id" value="{{ t.id }}"><input type="hidden" name="action" value="note">
+              <label>What was it?<input name="note" value="{{ t.note }}" maxlength="500" size="28"></label><button type="submit" class="primary-sm">Save</button></form></details></td>
+        {% if admin %}<td><form method="post" action="{{ url_for('platform_bank_note', slug=c.slug) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="txn_id" value="{{ t.id }}"><input type="hidden" name="action" value="done"><button type="submit">Done</button></form></td>{% endif %}
+      </tr>{% endfor %}
+    </table></div>
+    {% else %}<div class="empty">Nothing to sort out. Every bank transaction since {{ bank.since|longdate }} is recorded.</div>{% endif %}
+    {% if bank.done %}<details class="card-sec" style="margin:0;border:0;border-top:1px solid var(--line);border-radius:0"><summary><span>Recently done</span><span class="muted">{{ bank.done|length }}</span></summary>
+      <table><tr><th>Date</th><th>Description</th><th class="n">Amount</th><th>Note</th><th>Done</th>{% if admin %}<th></th>{% endif %}</tr>
+      {% for t in bank.done %}<tr><td>{{ t.date|mdy }}</td><td>{{ t.description }}</td><td class="n">{{ t.amount|money }}</td><td>{{ t.note }}</td><td>{{ t.doneAt|when }}</td>
+        {% if admin %}<td><form method="post" action="{{ url_for('platform_bank_note', slug=c.slug) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="txn_id" value="{{ t.id }}"><input type="hidden" name="action" value="undo"><button type="submit">Undo</button></form></td>{% endif %}</tr>{% endfor %}
+      </table></details>{% endif %}
+  </section>
+  {% else %}
+  <section><h2>Bank transactions to categorize <span>{% if b and b.uncategorized %}{{ csv('bank') }}{% endif %}</span></h2>
+    {% if not b %}<div class="empty">Not included in this summary.</div>
+    {% elif b.error %}<div class="warn" style="margin:14px">Bank transactions couldn't be read from Zoho when this summary was built.</div>
+    {% else %}
+      {% if b.accounts %}<div class="scroll"><table>
+        <tr><th>Account</th><th class="hide-sm">Type</th><th class="n">Balance in Zoho</th><th class="n">To categorize</th></tr>
+        {% for a in b.accounts %}<tr><td>{{ a.name }}</td><td class="hide-sm">{{ a.type }}</td><td class="n">{{ a.balance|money }}</td><td class="n">{% if a.uncategorized %}<span class="pill soon">{{ a.uncategorized }}</span>{% else %}0{% endif %}</td></tr>{% endfor %}
+      </table></div>{% endif %}
+      {% if b.uncategorized %}<div class="scroll"><table>
+        <tr><th>Date</th><th>Account</th><th>Description</th><th class="hide-sm">In/out</th><th class="n">Amount</th></tr>
+        {% for t in b.uncategorized %}<tr><td>{{ t.date|longdate }}</td><td>{{ t.account }}</td><td>{{ t.description }}</td><td class="hide-sm">{{ t.direction }}</td><td class="n">{{ t.amount|money }}</td></tr>{% endfor %}
+      </table></div>
+      <p class="hint">If you know what any of these are, tell Unscatter (vendor, what it was for, which location) and we'll categorize them.</p>
+      {% else %}<div class="empty">Every bank transaction is categorized.</div>{% endif %}
+      <p class="hint">Read from Zoho {{ b.pulledAt|when }}.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+  {% if coa %}
+  <section><h2>Chart of accounts to review <span>{% if coa and coa.issues %}{{ csv('accounts') }}{% endif %}</span></h2>
+    {% if coa and coa.issues %}
+      <div class="inc-grid">{% for k, n in coa.issueCounts|dictsort %}<div><strong>{{ n }}</strong>{{ k }}</div>{% endfor %}</div>
+      <div class="scroll"><table>
+        <tr><th>Account</th><th class="hide-sm">Number</th><th class="hide-sm">Type</th><th>Issue</th><th class="hide-sm">Detail</th></tr>
+        {% for i in coa.issues %}<tr><td>{{ i.account }}</td><td class="hide-sm">{{ i.code or '' }}</td><td class="hide-sm">{{ i.type or '' }}</td><td>{{ i.issue }}</td><td class="hide-sm">{{ i.detail or '' }}</td></tr>{% endfor %}
+      </table></div>
+      <p class="hint">{{ coa.accounts }} accounts checked. These are suggestions to tidy up; nothing changes until we agree on it.</p>
+    {% else %}<div class="empty">No chart of accounts issues found{% if coa %} ({{ coa.accounts }} accounts checked){% endif %}.</div>{% endif %}
+  </section>
+  {% endif %}
+{% endif %}
+{% if admin %}<p class="src no-print"><a href="{{ url_for('client_settings', slug=c.slug) }}">Client settings</a> (bank accounts, cleanup start date)</p>{% endif %}
+{% endif %}
+{% endblock %}
