@@ -16,7 +16,7 @@
   <div class="tile"><div class="k">Old accounts mapped</div><div class="v">{{ summ.sources - summ.unmapped }} / {{ summ.sources }}</div>
     <div class="s">{% for k, v in summ.by_source.items() %}{{ {'zoho': 'Zoho', 'category': 'Finance categories', 'bank': 'bank feeds'}.get(k, k) }} {{ v }}{{ ' · ' if not loop.last }}{% endfor %}</div></div>
   <div class="tile"><div class="k">Confirmed by you</div><div class="v">{{ summ.confirmed }}</div><div class="s">the rest are suggestions</div></div>
-  <div class="tile"><div class="k">Needs a decision</div><div class="v">{{ iss.type_changes|length + iss.duplicates|length + iss.same_name|length + iss.unmapped|length }}</div>
+  <div class="tile"><div class="k">Needs a decision</div><div class="v">{{ iss.type_changes|length + iss.duplicates|length + iss.same_name|length + iss.similar|length + iss.unmapped|length }}</div>
     <div class="s">type changes, duplicates, unmapped</div></div>
 </div>
 
@@ -51,8 +51,8 @@
 </details>
 
 <details class="card-sec" open>
-  <summary><span>Possible duplicates</span><span class="muted">{{ iss.duplicates|length + iss.same_name|length }}</span></summary>
-  {% if iss.duplicates or iss.same_name %}
+  <summary><span>Possible duplicates</span><span class="muted">{{ iss.duplicates|length + iss.same_name|length + iss.similar|length }}</span></summary>
+  {% if iss.duplicates or iss.same_name or iss.similar %}
   <div class="scroll"><table><tr><th>What</th><th>Accounts</th>{% if editor %}<th>Merge</th>{% endif %}</tr>
   {% for d in iss.duplicates %}{% set fam = d.accounts %}
     <tr><td>{{ d.family }}</td><td class="small" style="white-space:normal;max-width:420px">{% for a in fam %}{{ a }}{{ ' · ' if not loop.last }}{% endfor %}</td>
@@ -61,6 +61,11 @@
   {% for d in iss.same_name %}{% set fam = d.accounts %}
     <tr><td>Same name ({{ types[d.type][0] }})</td><td class="small" style="white-space:normal;max-width:420px">{% for a in fam %}{{ a }}{{ ' · ' if not loop.last }}{% endfor %}</td>
       {% if editor %}<td>{% include "_merge_form.html" %}</td>{% endif %}</tr>
+  {% endfor %}
+  {% for d in iss.similar %}{% set fam = d.plain %}
+    <tr><td>{{ 'Same thing, different name' if d.kind == 'same' else 'Similar names' }}</td><td class="small" style="white-space:normal;max-width:420px">{% for a in d.accounts %}{{ a }}{{ ' · ' if not loop.last }}{% endfor %}</td>
+      {% if editor %}<td>{% include "_merge_form.html" %}
+        <form method="post" class="mini" style="margin-top:4px"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="not-dup"><input type="hidden" name="ids" value="{{ d.ids|join(',') }}"><button type="submit" class="link small">Not the same</button></form></td>{% endif %}</tr>
   {% endfor %}</table></div>
   <p class="hint" style="padding:0 14px">Merging moves the old accounts (and any sub-accounts) onto the account you pick; the merged account disappears from the clean chart. Accounts that are really different (e.g. separate state tax payables) can stay as sub-accounts — set their parent on the Chart tab instead.</p>
   {% else %}<div class="empty">None found.</div>{% endif %}

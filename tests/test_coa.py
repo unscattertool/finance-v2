@@ -70,7 +70,38 @@ def main():
         raise AssertionError("income under expense")
     except ValueError:
         pass
+    similar_test()
     print("OK")
+
+
+def similar_test():
+    import sqlite3
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    rows = [("1", "Rent", "Expense", ""), ("2", "Rent Expense", "Expense", ""), ("3", "Automobile Expense", "Expense", ""),
+            ("4", "Car Expense", "Expense", ""), ("5", "Car Expense:Sales Car Expense", "Expense", "Car Expense"),
+            ("6", "Advertising", "Expense", ""), ("7", "Advertising And Marketing", "Expense", ""),
+            ("8", "Business Credit Card - 5119", "Credit Card", ""), ("9", "Business Credit Card - 6104", "Credit Card", ""),
+            ("10", "Supply Sales", "Income", ""), ("11", "Supply Sales:Inking Sales", "Income", "Supply Sales"),
+            ("12", "Supply Sales:Misc Supply Sales", "Income", "Supply Sales"), ("13", "Labor Sales", "Income", ""),
+            ("14", "Discounts on Labor", "Income", ""), ("15", "Accounts Receivable from C-Corp", "Other Asset", ""),
+            ("16", "Accounts Receivable from S-Corp", "Other Asset", "")]
+    text = "Account ID,Account Name,Account Type,Parent Account\n" + "\n".join(",".join(r) for r in rows)
+    items = coa.read_zoho_csv(text)
+    coa.import_sources(db, "c", "zoho", items, "t")
+    coa.propose(db, "c", "zoho", items, "t")
+    sim = coa.issues(db, "c")["similar"]
+    groups = {(d["kind"], tuple(d["plain"])) for d in sim}
+    assert ("same", ("Rent", "Rent Expense")) in groups, groups
+    assert ("same", ("Automobile Expense", "Car Expense")) in groups, groups
+    assert ("possible", ("Advertising", "Advertising And Marketing")) in groups, groups
+    flat = {a for d in sim for a in d["plain"]}
+    for never in ("Business Credit Card - 5119", "Supply Sales:Misc Supply Sales", "Discounts on Labor",
+                  "Accounts Receivable from C-Corp", "Car Expense:Sales Car Expense"):
+        assert never not in flat, (never, groups)
+    rent = next(d for d in sim if "Rent" in d["plain"])
+    coa.not_duplicates(db, "c", rent["ids"], "t")
+    assert not any("Rent" in d["plain"] for d in coa.issues(db, "c")["similar"])
 
 
 if __name__ == "__main__":

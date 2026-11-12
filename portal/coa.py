@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS account_map (
   source_parent TEXT, source_code TEXT, source_active INTEGER DEFAULT 1, uses INTEGER,
   account_id INTEGER, status TEXT NOT NULL DEFAULT 'suggested', note TEXT, updated_by TEXT, updated_at TEXT,
   PRIMARY KEY (client, source, source_key));
+CREATE TABLE IF NOT EXISTS account_not_dup (
+  client TEXT NOT NULL, pair TEXT NOT NULL, by_user TEXT, at TEXT, PRIMARY KEY (client, pair));
 """
 
 # clean account types: key -> (label, class, normal balance, statement section)
@@ -132,6 +134,149 @@ FAMILIES = [
     ("Federal payroll taxes (941)", lambda n, t: t == "payroll_liability" and "941" in n),
     ("Wages / payroll payable", lambda n, t: t == "payroll_liability" and re.search(r"wages|salaries|payroll wages|payroll tax payable|payroll tax to pay", n)),
 ]
+
+
+# similar names: words that say nothing about what an account holds, and words that mean the same thing
+_STOP = {"and", "of", "the", "to", "for", "on", "in", "a", "an", "from", "expense", "expenses", "exp", "account",
+         "acct", "paid", "given", "misc", "miscellaneous", "general", "other", "non", "hand", "x"}
+_STOP_BY_CLASS = {
+    "income": {"income", "sale", "revenue", "received", "inc"},
+    "expense": {"cost", "good", "sold", "cog", "purchased"},
+    "asset": {"asset"},
+    "liability": {"liability", "payable", "pay"},
+    "equity": {"equity"},
+}
+_SAME = {"automobile": "car", "auto": "car", "vehicle": "car", "telephone": "phone", "cellular": "phone",
+         "cell": "phone", "freight": "shipping", "charity": "charitable", "earned": "", "salary": "wage",
+         "fee": "charge", "recievable": "receivable", "txble": "taxable", "dept": "department",
+         "reimbursment": "reimbursement", "contractor": "contract", "consultant": "contract", "consulting": "contract",
+         "dues": "subscription", "stationery": "printing", "photocopying": "printing", "copying": "printing",
+         "inking": "ink", "taxe": "tax", "nm": "new mexico", "withholding": "income tax", "withhold": "income tax"}
+# a name with one of these and a name without are opposites, not duplicates (Discounts on Labor vs Labor Sales)
+# too general to call two accounts duplicates on their own (Other Charges vs Shipping Charge, Taxes vs Payroll Taxes)
+_GENERIC = {"charge", "service", "tax", "payment", "supply", "purchase", "office", "reimbursement", "loan", "payroll",
+            "employee", "income", "sale", "labor", "deposit", "insurance", "receivable", "clearing"}
+_CONTRA = {"discount", "refund", "return", "rebate", "allowance", "shrinkage", "write", "bad", "void", "fraud"}
+
+
+def _stem(w):
+    if w in _SAME:
+        return _SAME[w]
+    for suf, rep in (("ies", "y"), ("ses", "s"), ("s", "")):
+        if len(w) > 3 and w.endswith(suf) and not w.endswith("ss"):
+            w = w[: -len(suf)] + rep
+            break
+    return _SAME.get(w, w)
+
+
+def name_words(name, cls):
+    """The words that say what an account holds: plurals and synonyms folded, filler words dropped. Account numbers
+    (5119, #2, 1.5) are kept, so cards / loans / lines that differ only by number are not called duplicates."""
+    raw = (name or "").replace("'", "").replace("’", "")
+    nums = {"#" + x for x in re.findall(r"\d+(?:\.\d+)?", raw)}
+    n = re.sub(r"[^a-z ]+", " ", raw.lower().replace(":", " "))
+    stop = _STOP | _STOP_BY_CLASS.get(cls, set())
+    out = set()
+    for w in n.split():
+        for x in _stem(w).split():
+            if x and x not in stop:
+                out.add(x)
+    return frozenset(out | nums)
+
+
+def _pairkey(i, j):
+    return f"{min(i, j)}-{max(i, j)}"
+
+
+def similar_groups(acc, dismissed=()):
+    """Accounts in the same class (asset, liability, ...) whose names say the same thing.
+
+    'same'      same type and the words match once filler / plurals / synonyms are folded
+                (Rent ~ Rent Expense, Automobile Expense ~ Car Expense, Taxes paid:Property taxes ~ Taxes:Property Tax Paid)
+    'possible'  one name is the other plus one word (Advertising ~ Advertising And Marketing), the same words under a
+                different parent (Postage ~ Office Expense:Shipping & postage), or a 'same' match across types
+                (Interest Income ~ Interest earned). Never an account and its own parent / sub-account; sub-accounts
+                of one parent are compared without the parent's words (Supply Sales:Misc Supply Sales is not a
+                duplicate of Supply Sales:Inking Sales).
+    `dismissed` holds 'id-id' pairs marked "not the same"; a group whose pairs are all dismissed is left out.
+    Returns [(kind, [ids])]."""
+    cls = {i: TYPES.get(a["type"], ("", "?"))[1] for i, a in acc.items()}
+    full = {i: name_words(full_name(acc, a), cls[i]) for i, a in acc.items()}
+    leaf = {i: name_words(a["name"], cls[i]) for i, a in acc.items()}
+    anc = {}
+    for i in acc:
+        seen, p = set(), acc[i].get("parent_id")
+        while p and p in acc and p not in seen:
+            seen.add(p)
+            p = acc[p].get("parent_id")
+        anc[i] = seen
+    dismissed = set(dismissed)
+
+    def kind(i, j):
+        if cls[i] != cls[j] or i in anc[j] or j in anc[i] or _pairkey(i, j) in dismissed:
+            return None
+        pi, pj = acc[i].get("parent_id"), acc[j].get("parent_id")
+        if pi and pi == pj:
+            pw = full.get(pi, frozenset())
+            wi, wj = leaf[i] - pw, leaf[j] - pw
+        else:
+            wi, wj = full[i], full[j]
+        if not wi or not wj or ((wi ^ wj) & _CONTRA):
+            return None
+        same_type = acc[i]["type"] == acc[j]["type"]
+        if wi == wj:
+            return "same" if same_type else "possible"
+        if not same_type:
+            return None
+        def sub(a, b):  # b is a plus one word, and a says something specific
+            return a < b and len(b) - len(a) == 1 and bool(a - _GENERIC)
+        if sub(wi, wj) or sub(wj, wi):
+            return "possible"
+        if not (pi and pi == pj):
+            li, lj = leaf[i], leaf[j]
+            if (pi and not pj and (wj == li or sub(wj, li))) or (pj and not pi and (wi == lj or sub(wi, lj))):
+                return "possible"
+        return None
+
+    ids = sorted(acc)
+    root = {i: i for i in ids}
+
+    def find(i):
+        while root[i] != i:
+            root[i] = root[root[i]]
+            i = root[i]
+        return i
+    poss = []
+    for x, i in enumerate(ids):
+        for j in ids[x + 1:]:
+            k = kind(i, j)
+            if k == "same":
+                root[find(j)] = find(i)
+            elif k == "possible":
+                poss.append((i, j))
+    groups = collections.defaultdict(list)
+    for i in ids:
+        groups[find(i)].append(i)
+    out = [("same", g) for g in groups.values() if len(g) > 1]
+    # possible: cluster around each strong group / account, but don't chain (A~B and B~C doesn't make A~C)
+    near = collections.defaultdict(set)
+    for i, j in poss:
+        # not when one already matches the other's parent (Taxes ~ Taxes paid, so not ~ Taxes paid:Property taxes)
+        if {find(p) for p in anc[j]} & {find(i)} or {find(p) for p in anc[i]} & {find(j)}:
+            continue
+        if find(i) != find(j):
+            near[find(i)].add(find(j))
+            near[find(j)].add(find(i))
+    shown = set()
+    for r in sorted(near, key=lambda r: -len(near[r])):
+        members = frozenset([r] + sorted(near[r]))
+        if members in shown or any(members <= m for m in shown):
+            continue
+        shown.add(members)
+    for m in shown:
+        g = sorted(x for r in m for x in groups[r])
+        out.append(("possible", g))
+    return out
 
 
 # ------------------------------------------------------------------ source accounts
@@ -342,7 +487,31 @@ def issues(db, client):
         names_ = [full_name(acc, a) for a in lst]
         if len(lst) > 1 and not any(set(names_) <= f for f in in_family):
             out["same_name"].append(dict(type=t, accounts=names_))
+            in_family.append(set(names_))
+    # similar names (Rent ~ Rent Expense, Advertising ~ Advertising And Marketing)
+    dismissed = [r["pair"] for r in db.execute("SELECT pair FROM account_not_dup WHERE client=?", (client,))]
+    similar = []
+    for kind, ids in similar_groups(allacc, dismissed):
+        if not any(allacc[i]["active"] for i in ids):
+            continue
+        names_ = [full_name(allacc, allacc[i]) + ("" if allacc[i]["active"] else " (inactive)") for i in ids]
+        plain = {full_name(allacc, allacc[i]) for i in ids}
+        if any(plain <= f for f in in_family):
+            continue
+        similar.append(dict(kind=kind, ids=ids, accounts=names_, plain=sorted(plain, key=str.lower)))
+    out["similar"] = sorted(similar, key=lambda d: (d["kind"] != "same", d["plain"][0].lower()))
     return out
+
+
+def not_duplicates(db, client, ids, user):
+    """Mark every pair in `ids` as "not the same" so the group stops being suggested."""
+    ensure(db)
+    ids = sorted({int(i) for i in ids})
+    for x, i in enumerate(ids):
+        for j in ids[x + 1:]:
+            db.execute("INSERT OR REPLACE INTO account_not_dup (client, pair, by_user, at) VALUES (?,?,?,?)",
+                       (client, _pairkey(i, j), user, now()))
+    db.commit()
 
 
 def set_mapping(db, client, source, key, account_id, user, note=None):

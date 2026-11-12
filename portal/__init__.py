@@ -1446,6 +1446,13 @@ def create_app(instance_path=None):
                     coa.merge(db(), slug, src, names[want], user)
                     log("coa_merge", user=user, client=slug, src=src, into=names[want])
                     flash("Merged.", "ok")
+                elif act == "not-dup":
+                    ids = [x for x in (f.get("ids") or "").split(",") if x.strip().isdigit()]
+                    if len(ids) < 2:
+                        raise ValueError("Nothing to mark.")
+                    coa.not_duplicates(db(), slug, ids, user)
+                    log("coa_not_dup", user=user, client=slug, ids=",".join(ids))
+                    flash("Marked as different accounts; they won't be suggested again.", "ok")
                 elif act == "save-account":
                     aid = int(f["id"]) if (f.get("id") or "").isdigit() else None
                     pname = (f.get("parent_name") or "").strip().lower()

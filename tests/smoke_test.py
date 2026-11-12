@@ -73,6 +73,19 @@ def main():
             if code >= 400:
                 bad.append(u)
         assert not bad, bad
+        # chart: import a small Zoho chart, see the similar-name suggestion, mark it "not the same"
+        import io as _io
+        page = c.get("/c/crs/accounts").get_data(as_text=True)
+        tok = re.search(r'name="csrf_token" value="([^"]+)"', page).group(1)
+        csv_ = b"Account ID,Account Name,Account Type\n1,Rent,Expense\n2,Rent Expense,Expense\n"
+        r = c.post("/c/crs/accounts", data={"csrf_token": tok, "action": "import-zoho", "file": (_io.BytesIO(csv_), "Chart_of_Accounts.csv")},
+                   content_type="multipart/form-data", follow_redirects=True)
+        page = r.get_data(as_text=True)
+        assert r.status_code == 200 and "Same thing, different name" in page, page[-2000:]
+        ids = re.search(r'name="action" value="not-dup"><input type="hidden" name="ids" value="([^"]+)"', page).group(1)
+        r = c.post("/c/crs/accounts", data={"csrf_token": tok, "action": "not-dup", "ids": ids}, follow_redirects=True)
+        assert "Same thing, different name" not in r.get_data(as_text=True)
+        print("200 chart import + not-the-same")
         print("OK")
     finally:
         shutil.rmtree(inst, ignore_errors=True)
