@@ -1,0 +1,19 @@
+{
+ "clients": {
+  "wwk": {
+   "name": "The Wayward Kitchen",
+   "source": "graph",
+   "graph": {
+    "tenant_id": "PASTE-DIRECTORY-TENANT-ID",
+    "client_id": "PASTE-APPLICATION-CLIENT-ID",
+    "secret_env": "GRAPH_SECRET_UNSCATTER",
+    "drive_user": "tammy@unscatterllc.com",
+    "file_path": "Clients/Wayward/Data/transactionsEnding2026_10_02.xlsx"
+   },
+   "push_token_env": "PUSH_TOKEN_WWK",
+   "refresh_minutes": 15,
+   "days_ahead": 14,
+   "show": {"balance": true, "pending": true, "bills": true, "payroll": true}
+  }
+ }
+}

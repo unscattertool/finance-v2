@@ -1,0 +1,359 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} · card deposits &amp; tips{% endblock %}
+{% block heading %}{{ c.name }} · card deposits &amp; tips{% endblock %}
+{% block sub %}<p>Each card deposit split into sales and staff card tips · daily figures from {{ t.source }}</p>{% endblock %}
+{% block body %}
+<p><a href="{{ url_for('client_page', slug=c.slug) }}">← Back</a> · <a href="{{ url_for('closeouts_page', slug=c.slug) }}">Missing Shifts closeouts by employee →</a></p>
+<div class="tiles">
+  <a class="tile tile-link" href="#pending"><div class="k">Card deposits on the way</div><div class="v">{{ t.pending.total|money }}</div>
+    <div class="s">{% if t.pending.days %}{{ t.pending.days|length }} batch{{ '' if t.pending.days|length == 1 else 'es' }} · {{ t.pending.oldest|mdy }}–{{ t.pending.days[-1].date|mdy }} · not in the bank yet{% else %}Every batch has reached the bank{% endif %}</div></a>
+  <div class="tile"><div class="k">Card tips owed to staff</div><div class="v">{{ t.liability|money }}</div>
+    <div class="s">Collected in card deposits, not yet paid out in payroll</div></div>
+  <div class="tile"><div class="k">Deposits tied out</div><div class="v">{{ t.matched_count }} of {{ t.matched_count + t.unmatched_count }}</div>
+    <div class="s">Matched to the penny to a business day · last 75 days</div></div>
+  <div class="tile"><div class="k">Not tied out</div><div class="v {{ 'neg' if t.unmatched_count }}">{{ t.unmatched_total|money }}</div>
+    <div class="s">{{ t.unmatched_count }} deposit{{ '' if t.unmatched_count == 1 else 's' }} · kept as card sales until matched</div></div>
+</div>
+
+{% if t.pending.days %}
+<details class="card-sec" open id="pending">
+  <summary><span>Card deposits on the way (batch reports, not in the bank yet)</span><span class="muted">{{ t.pending.days|length }} · {{ t.pending.total|money }}</span></summary>
+  <table>
+    <tr><th>Business day</th><th class="n">Card sales</th><th class="n">Card tips</th><th class="n">Expected deposit</th><th class="hide-sm">From</th><th></th></tr>
+    {% for d in t.pending.days|reverse %}
+    <tr><td>{{ d.date|mdy }}</td><td class="n">{{ d.card_sales|money }}</td><td class="n">{{ d.card_tips|money }}</td><td class="n">{{ d.total|money }}</td>
+      <td class="hide-sm muted">{{ {'batch': 'Linga batch', 'processor': 'Processor', 'pos': 'Heartland batch'}.get(d.source, d.source) }}</td>
+      <td>{% if d in t.pending.late %}<span class="pill late">late — check the bank</span>{% endif %}</td></tr>
+    {% endfor %}
+    <tr><td><b>Total</b></td><td class="n"><b>{{ t.pending.sales|money }}</b></td><td class="n"><b>{{ t.pending.tips|money }}</b></td><td class="n"><b>{{ t.pending.total|money }}</b></td><td class="hide-sm"></td><td></td></tr>
+  </table>
+  <p class="hint">Each batch is deposited as one amount (card sales + tips), usually 1–3 business days later; weekend batches can land together on Monday. A batch moves off this list when its deposit shows up in the bank feed and matches. "Late" = more than {{ 7 }} days old.</p>
+</details>
+{% endif %}
+
+{% if editor %}
+<details class="card-sec" id="import">
+  <summary><span>Import data</span><span class="muted">batches {{ t.last_batch[0][:10]|mdy if t.last_batch and t.last_batch[0] else '—' }} · Gusto {{ t.gusto[0].pay_day|mdy if t.gusto else '—' }} · sales {{ ss.report_last|mdy if ss and ss.report_last else '—' }}</span></summary>
+  <form method="post" enctype="multipart/form-data" class="import-row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>What are you importing?
+      <select name="action" data-import-type>
+        <option value="batch" data-accept=".csv,text/csv" data-hint="Linga back office → Reports → Batch Report (CSV). Card payments and tips per batch and server.">Linga Batch Report (CSV)</option>
+        <option value="salesum" data-accept=".xlsx" data-hint="Linga back office → Reports → Sale Summary Report (Excel). Gross sales, net sales and sales tax per check.">Linga Sale Summary Report (Excel)</option>
+        <option value="gusto" data-accept=".csv,text/csv" data-hint="Gusto → Reports → Payroll Journal (CSV). Paycheck tips, cash tips and net pay per pay run.">Gusto Payroll Journal (CSV)</option>
+        <option value="archive" data-accept=".xlsx,.csv" data-hint="Any Linga report exports (.xlsx) — select them all at once; each is recognised by its title (Transaction, Paid In/Out, Attendance, Tax, Sale Summary, Gratuity, Refund, Discount, Void…).">Linga reports (several files)</option>
+      </select></label>
+    <label>File <input type="file" name="file" accept=".csv,text/csv" multiple required></label>
+    <button type="submit" class="primary-sm">Import</button>
+  </form>
+  <p class="hint" data-import-hint style="padding:0 14px">Linga back office → Reports → Batch Report (CSV). Card payments and tips per batch and server.</p>
+  <p class="hint" style="padding:0 14px">Re-importing an overlapping range is safe: newer files replace the same days or pay runs.</p>
+  {% if admin %}<form method="post" class="import-row" style="border-top:1px solid var(--line)">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="archive_onedrive">
+    <button type="submit">Reload Linga archive from OneDrive</button>
+    <span class="hint">Reads every report in Data/LingaReportData plus the Batch Report and Payroll Journal CSVs in Data. Linga itself is gone (removed 10/28), so there is nothing left to pull from it.</span>
+  </form>{% endif %}
+</details>
+{% endif %}
+
+{% if editor and pr.provider %}
+<details class="card-sec" id="processor">
+  <summary><span>Card processor (Heartland)</span><span class="muted">{% if pr.txns %}{{ pr.txns }} transactions {{ pr.first|mdy }}–{{ pr.last|mdy }}{% else %}{{ 'set up' if pr.configured else 'key missing' }}{% endif %}</span></summary>
+  {% if pr.configured %}
+  <form method="post" class="import-row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="processor">
+    <label>Days back <input name="days" type="number" min="1" max="62" value="7" style="width:6em"></label>
+    <button type="submit" class="primary-sm">Pull from Heartland</button>
+    <span class="hint">{{ 'Sandbox (test) account' if pr.env == 'cert' else 'Live account' }} · last pulled {{ pr.pulled_at[:16].replace('T', ' ') if pr.pulled_at else 'never' }} · {{ pr.batches }} batches</span>
+  </form>
+  {% else %}<div class="warn" style="margin:12px 14px">Add the Heartland secret API key as the environment variable <b>{{ pr.key_env }}</b> in cPanel (Setup Python App → finance-portal), then Save and Restart.</div>{% endif %}
+  <p class="hint" style="padding:0 14px">Read-only: pulls card transactions, tips and batches (each batch is one bank deposit) for the last days and fills card sales and card tips per business day for days the Linga batch report doesn't cover, so card deposits keep matching and tips keep splitting.</p>
+</details>
+{% endif %}
+
+{% if editor %}
+<details class="card-sec" id="pos">
+  <summary><span>Import shifts &amp; sales from another POS</span><span class="muted">{% for x in pi.sources %}{{ x.source }} {{ x.a|mdy }}–{{ x.b|mdy }}{{ ' · ' if not loop.last }}{% else %}Heartland, Genius, any POS{% endfor %}</span></summary>
+  <form method="post" enctype="multipart/form-data" class="form" style="padding:12px 14px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="pos">
+    <div class="row2"><label>POS / source <input name="source" value="{{ pi.sources[0].source if pi.sources else 'Heartland' }}" maxlength="40" required></label>
+      <label>Files (CSV, Excel — several at once is fine) <input type="file" name="file" accept=".csv,.tsv,.txt,.xlsx" multiple></label></div>
+    <label>…or paste the table (from a report or the POS's AI assistant — the one-value-per-line copy works too)
+      <textarea name="text" rows="6" placeholder="First Name&#10;Last Name&#10;Job Type Name&#10;Punch In Date Ltz&#10;…"></textarea></label>
+    <div class="actions"><button type="submit" class="primary-sm">Import</button></div>
+  </form>
+  <p class="hint" style="padding:0 14px">Columns are recognised by name: employee (or first + last name), job, clock in / punch in, clock out, date, hours, declared tips, gross sales, net sales, tips, taxes, check #. Each day, export <b>Transactions</b>, <b>Time Clock</b> and <b>Daily Summary</b> from Heartland (plus <b>Taxes</b> for the exact liquor tax) and drop the files in — several days at once is fine. Batch Credit Card, Cash Summary, Tips &amp; Payouts and Payroll Summary are recognised too. They give card sales, card tips and cash per day (deposit matching, tips check, Cash page), tax collected by type per day (sales-tax table, liquor tax exact), sales and tips per server, and clock punches (hours check, missing closeouts). A shift listed once per linked sales total counts its hours once; “1969-12-31” punch-outs mean still clocked in. Importing the same POS and dates again replaces them. The data feeds the hours check (Checks vs payroll), Missing closeouts, Name matching, the tips check (days with no Linga batch) and the sales-tax table (days Linga doesn't cover). The Linga importer above is unchanged.</p>
+  {% if pi.reports %}<p class="hint" style="padding:0 14px">Daily reports on file: {% for x in pi.reports %}{{ x.kind }} {{ x.days }} day{{ '' if x.days == 1 else 's' }} ({{ x.a|mdy }}–{{ x.b|mdy }}){{ ' · ' if not loop.last }}{% endfor %}</p>{% endif %}
+  {% if pi.batches %}
+  <table>
+    <tr><th>Card batch (POS)</th><th class="n">Batch</th><th class="n">Card sales + tips</th><th class="n">Difference</th></tr>
+    {% for b in pi.batches %}<tr><td>{{ b.date|mdy }}</td><td class="n">{{ b.batch|money }}</td><td class="n">{{ b.payments|money if b.payments is not none else '—' }}</td>
+      <td class="n {{ 'neg' if b.diff is not none and b.diff|abs >= 0.01 }}">{{ (b.diff|money) if b.diff is not none and b.diff|abs >= 0.01 else ('✓' if b.diff is not none else 'no Transactions report') }}</td></tr>{% endfor %}
+  </table>
+  {% endif %}
+  {% if pi.imports %}
+  <table>
+    <tr><th>Imported</th><th>Source</th><th>File</th><th>Dates</th><th class="n">Rows</th><th class="n">Shifts</th><th></th></tr>
+    {% for x in pi.imports %}
+    <tr class="{{ 'muted' if x.replaced }}"><td class="small">{{ x.imported_at[:16].replace('T', ' ') }}</td><td>{{ x.source }}</td><td class="small">{{ x.label }}</td>
+      <td class="small">{{ x.first|mdy }}–{{ x.last|mdy }}</td><td class="n">{{ x.rows }}</td><td class="n">{{ x.shifts }}</td>
+      <td>{% if x.replaced %}<span class="small muted">replaced</span>{% else %}<form method="post" class="mini"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="pos_delete"><input type="hidden" name="id" value="{{ x.id }}"><button type="submit">Remove</button></form>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</details>
+{% endif %}
+
+{% if la and la.payments %}
+<details class="card-sec" id="archive">
+  <summary><span>Linga archive (final export)</span><span class="muted">{{ la.first|mdy }} – {{ la.last|mdy }} · {{ la.payments }} payments</span></summary>
+  <table>
+    <tr><th>Paid with</th><th class="n">Amount</th></tr>
+    {% for k, v in la.tenders|dictsort %}<tr><td>{{ k }}</td><td class="n">{{ v|money }}</td></tr>{% endfor %}
+  </table>
+  {% if la.taxes %}<table>
+    <tr><th>Tax collected (Linga)</th><th class="n">Amount</th></tr>
+    {% for k, v in la.taxes|dictsort %}<tr><td>{{ k }}</td><td class="n">{{ v|money }}</td></tr>{% endfor %}
+    <tr><td><b>Total</b></td><td class="n"><b>{{ la.taxes.values()|sum|money }}</b></td></tr>
+  </table>{% endif %}
+  <p class="hint">
+    {% if la.gratuity %}Automatic gratuity (staff money): {% for n, v in la.gratuity %}{{ n }} {{ v|money }}{{ ', ' if not loop.last }}{% endfor %}. {% endif %}
+    {% if la.refunds %}Refunds: {% for r in la.refunds %}{{ r['Date'] }} check {{ r['Check Number'] }} {{ r['Total Amount']|money }} ({{ r['Reason'] }}){{ ', ' if not loop.last }}{% endfor %}. {% endif %}
+    {% if la.discounts %}Discounts: {% for d in la.discounts %}{{ d['Discount Name'] }} {{ d['Discount Total']|money }} × {{ d['Count'] }}{{ ', ' if not loop.last }}{% endfor %}. {% endif %}
+    {% if la.voids %}Voided items: {{ la.voids.lines }} lines, {{ la.voids.by_person.values()|sum|money }} (most by {% for n, v in la.voids.by_person|dictsort(by='value', reverse=true) %}{% if loop.index <= 3 %}{{ n }} {{ v|money }}{{ ', ' if loop.index < 3 and not loop.last }}{% endif %}{% endfor %}). {% endif %}
+    Time clock: {{ la.attendance }} shifts, {{ la.hours }} hours ({{ la.att_first|mdy }} – {{ la.att_last|mdy }}) — compared with Gusto on <a href="{{ url_for('checks_page', slug=c.slug) }}#hours">Checks vs payroll</a>.
+    {% if la.paid %}Paid in/out: {{ la.paid }} entries, {{ la.paid_total|money }} ({{ la.paid_first|mdy }} – {{ la.paid_last|mdy }}) — on the <a href="{{ url_for('cash_page', slug=c.slug) }}#linga-cash">Cash</a> page.{% endif %}
+  </p>
+  <p class="hint">Linga was removed on 10/28/2026. The full export is kept in OneDrive (Data/LingaReportData); reports Finance doesn't use (menu items, modifiers, hourly sales, menu setup) stay there for reference.</p>
+</details>
+{% endif %}
+
+{% if ss %}
+<details class="card-sec" open id="salestax">
+  {% set by_month = request.args.get('ss') == 'month' %}
+  <summary><span>Sales, sales tax and tips by {{ 'month' if by_month else 'pay period' }}</span><span class="muted">tax on {{ ss.tax_days }} Shifts days{% if ss.linga_days %} · {{ ss.linga_days }} from Linga{% endif %}</span></summary>
+  <p class="sumline no-print">Show by
+    <a class="btn{{ '' if by_month else ' on' }}" href="{{ url_for('tips_page', slug=c.slug) }}#salestax">Pay period</a>
+    <a class="btn{{ ' on' if by_month else '' }}" href="{{ url_for('tips_page', slug=c.slug, ss='month') }}#salestax">Month</a></p>
+  <table>
+    <tr><th>{{ 'Month' if by_month else 'Pay period' }}</th><th class="n">Gross sales</th><th class="n">Tax collected</th>{% if ss.liquor_split %}<th class="n hide-sm">Sales tax 6.05%</th><th class="n hide-sm">Liquor tax 13.5%</th>{% endif %}<th class="n">Product sales</th><th class="n hide-sm">Tax rate</th><th class="n hide-sm">Card payments</th><th class="n hide-sm">Cash payments</th><th class="n hide-sm" title="Gross sales − card payments − cash payments">Difference</th><th class="n">Card tips</th><th class="n hide-sm">Not in Shifts</th><th class="hide-sm">Days without tax</th></tr>
+    {% for p in (ss.months if by_month else ss.periods) %}
+    <tr><td>{% if by_month %}{{ p.label }}{% else %}{{ p.start|mdy }}–{{ p.end|mdy }}{% endif %}</td>
+      <td class="n">{{ p.gross|money if p.gross else '—' }}</td>
+      <td class="n">{{ p.tax|money if p.tax else '—' }}</td>
+      {% if ss.liquor_split %}<td class="n hide-sm">{{ p.sales_tax|money if p.tax else '—' }}</td><td class="n hide-sm">{{ p.liquor|money if p.liquor else '—' }}</td>{% endif %}
+      <td class="n"><b>{{ p.product|money if p.gross else '—' }}</b></td>
+      <td class="n hide-sm muted">{{ '%.2f%%'|format(p.rate) if p.rate else '—' }}</td>
+      <td class="n hide-sm">{{ p.card|money if p.card else '—' }}</td>
+      <td class="n hide-sm">{{ p.cash|money if p.cash else '—' }}</td>
+      <td class="n hide-sm {{ 'neg' if p.gap|abs >= 50 }}">{{ p.gap|money if p.gap|abs >= 0.01 else '✓' }}</td>
+      <td class="n">{{ p.tips|money if p.tips else '—' }}</td>
+      <td class="n hide-sm {{ 'neg' if p.shifts_short >= 25 }}">{{ p.shifts_short|money if p.shifts_short >= 0.01 else '—' }}</td>
+      <td class="hide-sm small {{ 'neg' if p.missing }}">{{ '%d of %d'|format(p.missing, p.days) if p.missing else ('all taxed' if p.days else '—') }}</td></tr>
+    {% endfor %}
+  </table>
+  <h3>Sales tax collected vs paid</h3>
+  <table>
+    <tr><th>Month</th><th class="n">Gross sales</th><th class="n">Tax collected</th>{% if ss.liquor_split %}<th class="n hide-sm">Sales tax 6.05%</th><th class="n hide-sm">Liquor tax 13.5%</th>{% endif %}<th class="n">Product sales</th><th class="n">Paid next month</th><th class="n hide-sm">Paid this month</th><th class="hide-sm">Days without tax</th></tr>
+    {% for m in ss.months %}
+    <tr><td>{{ m.label }}</td>
+      <td class="n">{{ m.gross|money if m.gross else '—' }}</td>
+      <td class="n">{{ m.tax|money if m.tax else '—' }}</td>
+      {% if ss.liquor_split %}<td class="n hide-sm">{{ m.sales_tax|money if m.tax else '—' }}</td><td class="n hide-sm">{{ m.liquor|money if m.liquor else '—' }}</td>{% endif %}
+      <td class="n">{{ m.product|money if m.gross else '—' }}</td>
+      <td class="n">{{ m.paid_next|money if m.paid_next else '—' }}</td>
+      <td class="n hide-sm muted">{{ m.paid_in|money if m.paid_in else '—' }}</td>
+      <td class="hide-sm small {{ 'neg' if m.missing }}">{{ '%d of %d'|format(m.missing, m.days) if m.missing else ('all taxed' if m.days else '—') }}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="hint">Gross sales, sales tax and product sales (Linga's net sales, after discounts and before tax: the restaurant's actual income) come from the imported Linga Sale Summary Report; days after the report use the Shifts closeouts (the “Sales tax” field) or “Pull from Linga” (up to 10 days per pull). Days with no tax figure are left out of the totals and counted under “Days without tax”. “Not in Shifts” = Linga sales on days the Shifts closeouts don't cover. {% if ss.liquor_split %}Tax collected includes Oklahoma's 13.5% mixed-beverage (liquor) tax: Linga's tax report gives {% for k, v in ss.taxes|dictsort %}{{ k }} {{ v|money }}{{ ', ' if not loop.last }}{% endfor %} for the whole period; the monthly liquor amounts are spread by each day's tax above the 6.05% rate, so they're estimates that add up to Linga's total.{% if ss.pos_tax_last %} Days from the Heartland <b>Taxes</b> report (through {{ ss.pos_tax_last|mdy }}) use its exact liquor and sales tax per day, with gross sales = card sales + cash taken (tips excluded).{% endif %} {% endif %}Tax is paid to Oklahoma the month after it's collected, so compare “Tax collected” with the next column (bank payments categorized under Sales Tax Remitted). Card tips are staff money and are never part of sales. <b>Balance check:</b> gross sales + card tips should equal card payments (with their tips) + cash payments, so “Difference” = gross sales − card payments − cash payments should be near zero. Cash payments come from Linga's payment records (cash and customer checks) while Linga was the POS, then the Heartland reports, else the cash turned in on Shifts closeouts; a big difference usually means a day's card or cash figures are missing, or other payment types (gift cards, house accounts) were used.</p>
+</details>
+{% endif %}
+
+{% if tc %}
+<details class="card-sec" open>
+  <summary><span>Employees still owed card tips</span><span class="muted">{{ tc.owed_total|money }} in fully recorded periods · {{ tc.owed_total_all|money }} incl. earlier</span></summary>
+  {% if not tc.has_servers %}<div class="warn">Re-import the Linga Batch Report (with the Server Name column) to see tips per employee.</div>{% endif %}
+  {% if tc.owed %}
+  <table>
+    <tr><th>Employee</th><th class="n">Owed · periods fully in Shifts</th><th class="n">Owed · all periods</th><th class="hide-sm">By pay period</th></tr>
+    {% for o in tc.owed %}
+    <tr><td>{{ o.name }}</td><td class="n {{ 'neg' if o.sure >= 0.01 }}">{{ o.sure|money if o.sure|abs >= 0.01 else '—' }}</td><td class="n muted">{{ o.owed|money }}</td>
+      <td class="hide-sm small muted">{% for p in tc.periods %}{% for e in p.employees if e.name == o.name and e.owed|abs >= 0.01 %}{{ p.start|mdy }}–{{ p.end|mdy }}: {{ e.owed|money }}{{ '; ' }}{% endfor %}{% endfor %}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="empty">Nobody is owed card tips for the pay periods in the Gusto journal.</div>{% endif %}
+  {% if tc.overpaid %}<p class="hint">Paid more than their card tips: {% for o in tc.overpaid %}{{ o.name }} {{ (-o.owed)|money }}{{ ', ' if not loop.last }}{% endfor %} — usually a tip-out or bar split recorded differently in Shifts; check the pay period below.</p>{% endif %}
+  <p class="hint">“Fully in Shifts” = pay periods where Shifts closeouts add up to the Linga batches (within $25){% if tc.sure_periods %}: {% for a, b in tc.sure_periods %}{{ a|mdy }}–{{ b|mdy }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}. In earlier periods tip-outs to bar and back-of-house weren't all recorded, so servers can look owed what they actually tipped out — use those amounts as leads, not totals.</p>
+  {% if tc.paper_until %}<p class="hint">Pay periods ending on or before {{ tc.paper_until|mdy }} were tracked on paper (gross sales, tip-outs, recipients, net tips), added up and entered in Gusto, so Gusto is the record for them and nobody is listed as owed for those periods. Linga card tips in those periods minus owner-kept minus Gusto: {{ tc.paper_gap|money }}.{% if tc.paper_leads %} Earned (by the rules below) minus Gusto paid in those periods, as leads only: {% for x in tc.paper_leads %}{{ x.name }} {{ x.gap|money }}{{ ', ' if not loop.last }}{% endfor %}.{% endif %}</p>{% endif %}
+  {% if tc.solo_bar %}<p class="hint">Bar register: through {{ tc.solo_bar.until|mdy }} card tips rung under the owner's Linga login go to the one bartender, {{ tc.solo_bar.bartender }} (shown in the period details). After that they're split by the tip-outs recorded in Shifts. Event closeouts in Shifts: card tips are split evenly among everyone listed on the event, unless the closeout records tip-outs.</p>{% endif %}
+  <p class="hint">Earned = card tips on the cards each person ran (Linga batch report) − tip-outs they gave + tip-outs and tip credits they received (Shifts). Paid = Gusto paycheck tips + cash tips for the same pay period. Covers pay periods in the imported Gusto journal.</p>
+</details>
+
+<details class="card-sec" open>
+  <summary><span>Card tips check by pay period: Linga vs Shifts vs Gusto</span><span class="muted">{{ tc.periods|length }}</span></summary>
+  <table>
+    <tr><th>Pay period</th><th class="n">Linga batches</th><th class="n">Shifts</th><th class="n hide-sm">Owner kept</th><th class="n">Gusto paid</th><th>Check</th></tr>
+    {% for p in tc.periods %}
+    <tr><td>{{ p.start|mdy }}–{{ p.end|mdy }}</td><td class="n">{{ p.batch|money }}</td><td class="n">{{ p.shifts|money }}</td><td class="n hide-sm muted">{{ p.owner_kept|money if p.owner_kept else '' }}</td><td class="n">{{ p.gusto|money }}</td>
+      <td>{% if p.paper %}<span class="pill">Paper records · Gusto is the record</span>{% if p.batch_vs_gusto|abs >= 0.01 %} <span class="muted small">Linga − owner − Gusto {{ p.batch_vs_gusto|money }}</span>{% endif %}{% elif p.match %}<span class="pill ok">All three match</span>{% else %}
+        {% if p.batch_vs_shifts|abs >= 0.01 %}<span class="pill soon">Shifts {{ (-p.batch_vs_shifts)|money }}</span>{% endif %}
+        {% if p.batch_vs_gusto|abs >= 0.01 %}<span class="pill late">Gusto {{ (-p.batch_vs_gusto)|money }}</span>{% endif %}
+        {% if not p.complete %}<span class="muted small">batch report doesn't cover the whole period</span>{% elif not p.shifts_ok %}<span class="muted small">Shifts incomplete: tip-outs may be missing</span>{% endif %}{% endif %}
+        <details class="inline"><summary class="btn">Details</summary>
+          <table class="mini">
+            <tr><th>Day</th><th class="n">Linga</th><th class="n">Shifts</th><th class="n">Difference</th></tr>
+            {% for d in p.days %}<tr><td>{{ d.date|mdy }}</td><td class="n">{{ d.batch|money }}</td><td class="n">{{ d.shifts|money }}</td><td class="n {{ 'neg-soft' if d.diff|abs >= 0.01 }}">{{ d.diff|money if d.diff|abs >= 0.01 else '' }}</td></tr>{% endfor %}
+          </table>
+          <table class="mini">
+            <tr><th>Employee</th><th class="n">Card tips (Linga)</th><th class="n">Tip-outs / credits</th><th class="n">Earned</th><th class="n">Gusto paid</th><th class="n">Owed</th></tr>
+            {% for e in p.employees %}<tr><td>{{ e.name }}</td><td class="n">{{ e.batch|money }}</td><td class="n">{{ e.adj|money if e.adj else '' }}</td><td class="n">{{ e.earned|money }}</td><td class="n">{{ e.paid|money }}</td>
+              {% if p.paper %}<td class="n muted small" title="Paper-records period: Gusto is the record, so this isn't counted as owed">{{ ('(' ~ (e.gap|money) ~ ')') if e.gap|abs >= 0.01 else '' }}</td>{% else %}<td class="n {{ 'neg' if e.owed >= 0.01 else ('pos-soft' if e.owed <= -0.01 else '') }}">{{ e.owed|money if e.owed|abs >= 0.01 else '' }}</td>{% endif %}</tr>{% endfor %}
+          </table>
+          {% if p.unassigned %}<p class="hint">Not matched to an employee: {% for k, v in p.unassigned.items() %}{{ k }} {{ v|money }}{{ '; ' if not loop.last }}{% endfor %} — fix under Name matching.</p>{% endif %}
+          {% if p.unsourced_credits %}<p class="hint">Shifts tip credits without a source shift: {{ p.unsourced_credits|money }} (added to the person, not taken from anyone).</p>{% endif %}
+        </details></td></tr>
+    {% endfor %}
+  </table>
+</details>
+
+{% if tc.event_tickets %}
+<details class="card-sec" id="events">
+  <summary><span>Catering / event tickets on manager &amp; owner logins</span><span class="muted">{{ tc.event_tickets|length }}</span></summary>
+  <table>
+    <tr><th>Date</th><th>Check</th><th>Login</th><th class="n">Paid</th><th class="n">Tip</th><th>Shifts event closeout (crew)</th></tr>
+    {% for x in tc.event_tickets %}
+    <tr><td>{{ x.date|mdy }}</td><td>{{ x.check_no }}</td><td>{{ x.login }} <span class="muted small">{{ x.role }}</span></td>
+      <td class="n">{{ x.amount|money }}</td><td class="n">{{ x.tip|money if x.tip else '—' }}</td>
+      <td class="small">{% for e in x.events %}{{ e.owner }}: {{ e.crew|join(', ') or 'no crew picked' }} ({{ e.tips|money }} tips){{ '; ' if not loop.last }}{% endfor %}{% if x.tipouts and not x.events %}tip-outs in Shifts: {% for t in x.tipouts %}{{ t.to }} {{ t.amount|money }}{{ ', ' if not loop.last }}{% endfor %}{% elif not x.events %}{% if x.tip and x.date > tc.paper_until %}<span class="neg">none — add one in Shifts with who worked</span>{% elif x.date <= tc.paper_until %}<span class="muted">paper records (Gusto)</span>{% else %}<span class="muted">no tip</span>{% endif %}{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="hint">Tickets of $400+ or tips of $100+ rung under {% for m in tc.managers %}{{ m }}{{ ', ' if not loop.last }}{% endfor %} (manager) or the owner's login. Working as manager (not the sole bartender) they don't keep the tip: on a Shifts <b>event</b> closeout pick the people who worked it and the tip is split evenly among them (managers on the crew are left out unless they worked it alone). Manager tips with no event closeout are listed as “to assign” in the pay period details instead of counting as theirs.</p>
+</details>
+{% endif %}
+
+<details class="card-sec" id="names">
+  <summary><span>Name matching (Linga / Shifts → Gusto employee)</span><span class="muted">{{ tc.names|length }}</span></summary>
+  <table>
+    <tr><th>Source</th><th>Name there</th><th>Gusto employee</th></tr>
+    {% for n in tc.names %}
+    <tr><td class="muted">{{ 'Linga server' if n.source == 'batch' else 'Shifts' }}</td><td>{{ n.name }}</td>
+      <td>{% if editor %}<form method="post" class="mini"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="tipname">
+        <input type="hidden" name="source" value="{{ n.source }}"><input type="hidden" name="name" value="{{ n.name }}">
+        <select name="employee" data-autosubmit>
+          <option value="" {{ 'selected' if not n.employee }}>— not matched —</option>
+          <option value="{{ tc.bar }}" {{ 'selected' if n.employee == tc.bar }}>Bar (split among bartenders on shift)</option>
+          <option value="{{ tc.owner }}" {{ 'selected' if n.employee == tc.owner }}>Owner (keeps own tips, not payroll)</option>
+          <option value="{{ tc.none }}" {{ 'selected' if n.employee == tc.none }}>Not an employee / ignore</option>
+          {% for e in tc.employees %}<option value="{{ e }}" {{ 'selected' if n.employee == e }}>{{ e }}{{ ' (not in Gusto yet)' if e in tc.extra }}</option>{% endfor %}
+        </select><noscript><button type="submit">Save</button></noscript></form>{% else %}{{ n.employee or '—' }}{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="hint">Matched automatically by name; change any that are wrong. Use “Bar” for a register whose tips belong to the bartenders (for example the owner's).</p>
+  {% if editor %}
+  <form method="post" class="import-row" style="border-top:1px solid var(--line)">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="addemp">
+    <label>Employee missing from the list (not in the Gusto journal yet)<input name="name" placeholder="Full name as in Gusto" required maxlength="80"></label>
+    <button type="submit" class="primary-sm">Add employee</button>
+  </form>
+  {% if tc.extra %}<p class="hint">Added by hand: {% for e in tc.extra %}<form method="post" class="mini" style="display:inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="delemp"><input type="hidden" name="name" value="{{ e }}">{{ e }} <button type="submit" class="link">remove</button></form>{{ ' · ' if not loop.last }}{% endfor %}. Once they're paid through Gusto and the journal is re-imported, pick their Gusto name instead and remove them here.</p>{% endif %}
+  {% endif %}
+</details>
+{% endif %}
+
+<details class="card-sec" open>
+  <summary><span>Card deposits</span><span class="muted">{{ t.deposits|length }}</span></summary>
+  {% if t.deposits %}
+  <table>
+    <tr><th>Bank date</th><th class="n">Deposit</th><th>Pays for</th><th class="n">Sales</th><th class="n">Card tips</th>
+      <th class="n hide-sm">Sales tax — state</th><th class="n hide-sm">Alcohol tax</th><th class="n">Tax payable</th><th class="n hide-sm" title="Hourly wages for the hours worked on the business days this deposit covers (its share of each day's sales) + employer payroll tax">Labor</th><th class="n hide-sm" title="Net sales × Food COGS purchases ÷ net sales over the 2 weeks before the deposit">Food cost</th><th class="n hide-sm" title="Net sales × Beverage COGS purchases ÷ net sales over the 2 weeks before the deposit">Bev. cost</th><th class="n" title="Deposit − card tips − sales tax − labor − food and beverage cost">Left</th></tr>
+    {% for d in t.deposits %}
+    {% if d.matched %}
+    <tr><td>{{ d.date|mdy }}</td><td class="n">{{ d.amount|money }}</td><td><span class="pill ok">Matched</span> {{ d.covers }}</td>
+      <td class="n">{{ d.sales|money }}</td><td class="n">{{ d.tips|money }}</td>
+      {% set x = stx.get(d.id) if stx else None %}<td class="n hide-sm">{{ x.state|money if x else '—' }}</td><td class="n hide-sm">{{ x.alc|money if x else '—' }}</td>
+      <td class="n">{{ x.total|money if x else '—' }}{% if x and x.estimated %} <span class="muted small">est.</span>{% endif %}</td>
+      {% set b = bd.get(d.id) if bd else None %}<td class="n hide-sm">{% if b %}<span title="Wages {{ b.wages|money }} + payroll tax {{ b.payroll_tax|money }}{{ ' · no hours found for ' ~ (b.days - b.labor_days) ~ ' day(s)' if b.labor_days < b.days }}">{{ b.labor|money }}</span>{% else %}—{% endif %}</td>
+      <td class="n hide-sm">{% if b and b.food is not none %}<span title="Food COGS {{ b.cogs_basis.food|money }} ÷ net sales {{ b.cogs_basis.sales|money }} (2 weeks before)">{{ b.food|money }}</span>{% else %}—{% endif %}</td>
+      <td class="n hide-sm">{% if b and b.bev is not none %}<span title="Beverage COGS {{ b.cogs_basis.bev|money }} ÷ net sales {{ b.cogs_basis.sales|money }} (2 weeks before)">{{ b.bev|money }}</span>{% else %}—{% endif %}</td>
+      <td class="n">{% if b %}<b class="{{ 'neg' if b.left < 0 }}">{{ b.left|money }}</b>{% else %}—{% endif %}</td></tr>
+    {% else %}
+    {% set near = d.near|sum(attribute='1') %}
+    <tr><td>{{ d.date|mdy }}</td><td class="n">{{ d.amount|money }}</td>
+      <td><span class="pill soon">Not matched</span>
+        <span class="muted small">{% if d.near %}{{ t.source }}: {{ near|money }} in total for the open days {% for day, v in d.near %}{{ day|mdy }}{{ ', ' if not loop.last }}{% endfor %}{% else %}no closeouts with card sales in the week before{% endif %}</span></td>
+      <td class="n muted">—</td><td class="n muted">—</td>
+      {% set x = stx.get(d.id) if stx else None %}<td class="n hide-sm">{{ x.state|money if x else '—' }}</td><td class="n hide-sm">{{ x.alc|money if x else '—' }}</td>
+      <td class="n">{{ x.total|money if x else '—' }}{% if x and x.estimated %} <span class="muted small">est.</span>{% endif %}</td>
+      <td class="n hide-sm muted">—</td><td class="n hide-sm muted">—</td><td class="n hide-sm muted">—</td><td class="n muted">—</td></tr>
+    {% endif %}
+    {% endfor %}
+  </table>
+  <p class="hint">The processor deposits card sales + card tips for a business day (or a weekend together) in one amount; fees are billed separately each month. A deposit that doesn't match means that day's closeouts are missing or incomplete.
+    Sales includes the sales tax customers paid: that part is split off each deposit as tax payable — state sales tax to <b>Sales Tax Payable</b>, mixed beverage tax to <b>Alc Sales Tax</b> — from each business day's card sales × that day's tax ÷ gross receipts (POS day totals). “est.” = not matched to business days yet, or a day without tax figures (estimated from nearby days).
+    <b>Labor, food and beverage cost are what the deposit has to cover (shown here only, not booked):</b> labor = hourly wages for the hours worked on the business days the deposit covers (POS Time Clock, else hours on the Shifts closeouts, × each person's pay rate), in proportion to the deposit's share of each day's sales, + employer payroll tax (from recent Gusto runs); salaries aren't included. Food and beverage cost = the deposit's net sales × what Food COGS and Beverage COGS purchases came to as a share of net sales over the 2 weeks before the deposit. Left = deposit − card tips − sales tax − labor − food and beverage cost. Hover a number for how it was worked out.</p>
+  {% else %}<div class="empty">No card deposits in the last 75 days.</div>{% endif %}
+</details>
+
+{% if t.open_days %}
+<details class="card-sec">
+  <summary><span>Business days not tied to a deposit</span><span class="muted">{{ t.open_days|length }}</span></summary>
+  <table>
+    <tr><th>Day</th><th class="n">Card sales</th><th class="n">Card tips</th><th class="n">Total</th><th class="hide-sm">Shifts</th></tr>
+    {% for d in t.open_days %}
+    <tr><td>{{ d.date|mdy }}</td><td class="n">{{ d.card_sales|money }}</td><td class="n">{{ d.card_tips|money }}</td><td class="n">{{ d.total|money }}</td><td class="hide-sm muted">{{ d.shifts or '' }}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="hint">Days from the last few days are normal here (the deposit hasn't landed yet). Older days usually need their closeouts finished in Shifts, or Close Day run against Linga.</p>
+</details>
+{% endif %}
+
+{% if t.gusto %}
+<details class="card-sec" open>
+  <summary><span>Payroll from the Gusto journal</span><span class="muted">{{ t.gusto|length }} runs · tips paid {{ t.gusto_tips|money }} vs collected {{ t.gusto_collected|money }}</span></summary>
+  <table>
+    <tr><th>Pay day</th><th>Run</th><th class="hide-sm">Period</th><th class="n">Card tips collected</th><th class="n">Paycheck tips</th><th class="n">Difference</th><th>Bank</th></tr>
+    {% for r in t.gusto %}
+    {% set diff = (r.collected - r.tips - (r.cash_tips or 0)) if r.collected is not none else none %}
+    <tr><td>{{ r.pay_day|mdy }}</td><td>{{ r.kind }}</td><td class="hide-sm">{% if r.period_start %}{{ r.period_start|mdy }}–{{ r.period_end|mdy }}{% endif %}</td>
+      <td class="n">{{ r.collected|money if r.collected is not none else '' }}</td>
+      <td class="n">{{ r.tips|money }}{% if r.cash_tips %}<br><span class="muted small">+ {{ r.cash_tips|money }} cash tips</span>{% endif %}</td>
+      <td class="n {{ 'neg-soft' if diff is not none and diff|abs > 1 }}">{{ diff|money if diff is not none else '' }}</td>
+      <td class="small">
+        {% if r.ee_tax + r.er_tax %}{% if r.tax_entry %}<span class="pill ok">Taxes {{ (r.ee_tax + r.er_tax)|money }} · {{ r.tax_entry.date|mdy }}</span>{% else %}<span class="pill late">Taxes {{ (r.ee_tax + r.er_tax)|money }} not in bank</span>{% endif %}{% endif %}
+        {% if r.net_dd %}{% if r.dd_entry %}<span class="pill ok">Direct deposit {{ r.net_dd|money }} · {{ r.dd_entry.date|mdy }}</span>{% else %}<span class="pill late">Direct deposit {{ r.net_dd|money }} not in bank</span>{% endif %}{% endif %}
+        {% if r.paper_total %}<span class="pill {{ 'ok' if r.paper_cleared == r.paper_total else 'soon' }}">Paper checks {{ r.paper_cleared }}/{{ r.paper_total }} cleared</span>
+          {% if r.outstanding %}<span class="muted">Not found: {% for p in r.outstanding %}{{ p.name }} {{ p.net|money }}{{ ', ' if not loop.last }}{% endfor %}</span>{% endif %}{% endif %}
+      </td></tr>
+    {% endfor %}
+  </table>
+  <p class="hint">Card tips collected = the Linga batches for that pay period. Paycheck tips = what Gusto paid out; they come off Payroll – Wages and off the amount owed to staff. A difference means tips earned in the period weren't all paid through payroll (or were paid in cash). Paper checks are matched by exact net pay within 75 days of the pay day.</p>
+</details>
+{% endif %}
+
+{% if t.payroll %}
+<details class="card-sec" open>
+  <summary><span>Card tips paid through payroll (estimated, no Gusto journal yet)</span><span class="muted">{{ t.payroll|length }}</span></summary>
+  {% if t.payroll %}
+  <table>
+    <tr><th>Debit</th><th class="n">Net pay</th><th>Pay period</th><th class="n">Card tips earned</th><th class="n">Taken off wages</th><th>Status</th></tr>
+    {% for p in t.payroll %}
+    <tr><td>{{ p.date|mdy }}</td><td class="n">{{ p.net_pay|money }}</td><td>{{ p.start|mdy }}–{{ p.end|mdy }}</td>
+      <td class="n">{{ p.suggested|money if p.main else '—' }}</td><td class="n">{{ p.tips|money }}</td>
+      <td>{% if p.status == 'confirmed' %}<span class="pill ok">Entered</span>{% elif p.status == 'auto' %}<span class="pill ok">Automatic</span>{% elif p.status == 'off-cycle' %}<span class="muted small">Off-cycle run</span>{% else %}<span class="pill soon">Waiting</span> <span class="muted small">{{ p.missing|length }} day{{ '' if p.missing|length == 1 else 's' }} not tied out</span>{% endif %}
+        {% if editor %}
+        <details class="inline"><summary class="btn">Set</summary>
+          <form method="post" class="mini">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="entry_id" value="{{ p.id }}">
+            <label>Card tips in this payroll <input name="amount" inputmode="decimal" size="8" value="{{ '%.2f'|format(p.tips if p.status == 'confirmed' else p.suggested) }}"></label>
+            <button type="submit" class="primary-sm">Save</button>
+          </form>
+          {% if p.status == 'confirmed' %}<form method="post" class="mini"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="entry_id" value="{{ p.id }}"><input type="hidden" name="action" value="reset"><button type="submit">Use automatic</button></form>{% endif %}
+        </details>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="hint">The card tips paid in a payroll come off Payroll – Wages and off the amount owed to staff. They're filled in automatically once every card deposit for that pay period has matched; until then, enter the "Paycheck tips" total from the Gusto payroll report. Pay periods are taken as two weeks, Monday–Sunday, ending {{ t.period_end|mdy }} and every 14 days from it, each paid in the next Gusto debit.</p>
+  {% else %}<div class="empty">No Gusto payroll debits in the last 75 days.</div>{% endif %}
+</details>
+{% endif %}
+{% endblock %}

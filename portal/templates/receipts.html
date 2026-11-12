@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} · receipts{% endblock %}
+{% block heading %}{{ c.name }} · receipts{% endblock %}
+{% block sub %}<p>Receipts and other documents for transactions</p>{% endblock %}
+{% block body %}
+{% macro show(x) %}{% if x.status == 'link' %}{% if x.link.startswith('http') %}<a href="{{ x.link }}" target="_blank" rel="noopener noreferrer">Open link ↗</a>{% else %}<span class="small">{{ x.link }}</span>{% endif %}{% else %}<a href="{{ url_for('receipt_file', slug=c.slug, rid=x.id) }}" target="_blank">{{ x.filename }}</a>{% endif %}{% endmacro %}
+<p><a href="{{ url_for('client_page', slug=c.slug) }}">← Back</a></p>
+<div class="card folderbar" id="folder">
+  <div><span class="muted small">Files go to</span><br><b>OneDrive › {{ folder.replace('/', ' › ') }} › <span class="muted">Vendor › Year</span></b>
+    <br><span class="small muted">On your computer: <code>&lt;your OneDrive&gt;\{{ folder.replace('/', '\\') }}\US Foods\{{ today[:4] }}\</code></span></div>
+  {% if admin %}<details class="inline"><summary class="btn">Change</summary>
+    <form method="post" class="form" style="margin-top:8px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="set-folder">
+      <label>Folder in your OneDrive <input name="folder" value="{{ folder }}" maxlength="200" required placeholder="Clients/Wayward/Receipts"></label>
+      <label class="check"><input type="checkbox" name="move_waiting" value="1" checked> Also send the {{ r.pending }} document{{ '' if r.pending == 1 else 's' }} still waiting for the sync there</label>
+      <label class="check"><input type="checkbox" name="move_filed" value="1"> Also move documents already in OneDrive there (done by the sync on your computer the next time it runs)</label>
+      <p class="hint">Must stay inside a client folder (Clients/&lt;client&gt;/…). A vendor folder and a year folder are added automatically (…\US Foods\2026\). Documents already in OneDrive stay where they are unless you tick the second box.</p>
+      <div class="actions"><button type="submit" class="primary-sm">Save folder</button></div>
+    </form></details>{% endif %}
+</div>
+<div class="tiles">
+  <div class="tile"><div class="k">Expenses without a receipt</div><div class="v">{{ r.missing|length }}</div><div class="s">last {{ r.days }} days · {{ r.missing|sum(attribute='amount')|abs|money }}</div></div>
+  <div class="tile"><div class="k">Receipts saved</div><div class="v">{{ r.receipts|length }}</div>
+    <div class="s">{% if r.pending %}<span class="neg-soft">{{ r.pending }} waiting for the sync to OneDrive</span>{% else %}all filed in OneDrive{% endif %}{% if r.unmatched %} · {{ r.unmatched }} not matched to a transaction{% endif %}</div></div>
+</div>
+
+{% if editor %}
+<div class="row2 cash-forms" id="add">
+  <form method="post" class="form card wide" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="upload">
+    {% if pre %}<input type="hidden" name="entry_id" value="{{ pre.id }}">{% endif %}
+    <strong>Upload a receipt</strong>
+    {% if pre %}<p class="muted">For {{ pre.date|mdy }} · {{ pre.payee or pre.description }} · {{ pre.amount|abs|money }}{{ ' (money in)' if pre.amount > 0 else '' }} <a href="{{ url_for('receipts_page', slug=c.slug) }}">change</a></p>{% endif %}
+    <label class="dropzone" data-drop-default><span><b>Drop PDFs or photos here</b> or <u>choose files</u></span><input type="file" name="file" accept="image/*,application/pdf" multiple required data-drop><span class="small muted" data-drop-list></span></label>
+    <div class="row2"><label>Date <input type="date" name="date" value="{{ pre.date if pre else today }}"></label>
+      <label>Amount <input name="amount" inputmode="decimal" placeholder="0.00" value="{{ '%.2f'|format(pre.amount|abs) if pre else '' }}"></label></div>
+    <label>Vendor <input name="vendor" maxlength="80" list="vendor-list" autocomplete="off" value="{{ (pre.payee or pre.description) if pre else '' }}" placeholder="pick from your vendors, or type a new one"></label>
+    <div class="row2"><label>Reference # <input name="ref" maxlength="40" placeholder="invoice / receipt / order # (if any)" value="{{ pre.check_no if pre and pre.check_no else '' }}"></label>
+      <label>Note <input name="note" maxlength="200" placeholder="optional"></label></div>
+    {% if not pre %}<div class="billopt"><label class="check"><input type="checkbox" name="as_bill" value="1"> Unpaid invoice — add it to upcoming bills (or match the open bill for this vendor)</label>
+      <label class="due">Due date <input type="date" name="due"></label></div>{% endif %}
+    <div class="naming"><span class="small">File name:</span>
+      <label class="check"><input type="radio" name="naming" value="rename" checked> Rename to VendorName_date_Reference#</label>
+      <label class="check"><input type="radio" name="naming" value="keep"> Keep the file's own name</label></div>
+    <p class="hint" data-name-preview data-base="{{ folder }}">Saved as <b data-name-out>VendorName_YYYY-MM-DD_Reference#</b><span data-name-note></span></p>
+    <p class="hint">On a phone this opens the camera. With an amount and date it's matched to the bank transaction automatically when only one fits.</p>
+    <div class="actions"><button type="submit" class="primary-sm">Upload</button></div>
+  </form>
+  <form method="post" class="form card wide">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="link">
+    {% if pre %}<input type="hidden" name="entry_id" value="{{ pre.id }}">{% endif %}
+    <strong>Or record where the receipt is</strong>
+    <label>Link or location <input name="link" maxlength="500" placeholder="https://drive.google.com/… or OneDrive link, or a folder path" required></label>
+    <div class="row2"><label>Date <input type="date" name="date" value="{{ pre.date if pre else today }}"></label>
+      <label>Amount <input name="amount" inputmode="decimal" placeholder="0.00" value="{{ '%.2f'|format(pre.amount|abs) if pre else '' }}"></label></div>
+    <div class="row2"><label>Vendor <input name="vendor" maxlength="80" list="vendor-list" autocomplete="off" value="{{ (pre.payee or pre.description) if pre else '' }}"></label>
+      <label>Reference # <input name="ref" maxlength="40" placeholder="if any"></label></div>
+    <div class="actions"><button type="submit" class="primary-sm">Save location</button></div>
+  </form>
+</div>
+{% endif %}
+
+<details class="card-sec"{{ ' open' if new_key or (admin and not sync.get('sha256')) or (sync.get('last_denied') and sync.last_denied > (sync.get('last_sync') or '')) }} id="sync">
+  <summary><span>Receipts sync on your computer</span><span class="muted">{% if r.last_sync %}last ran {{ r.last_sync[:16]|replace('T', ' ') }} UTC{% else %}not run yet{% endif %}{% if r.pending %} · {{ r.pending }} waiting{% endif %}</span></summary>
+  <div style="padding:0 14px 12px">
+  <p>Uploaded receipts wait here on the server until the sync runs on your computer. It copies them into your OneDrive folder — only into the folder shown at the top, always inside <b>Clients\&lt;client&gt;\</b> — and OneDrive uploads them by itself. Finance never gets permission to change your OneDrive.</p>
+  {% if sync.get('last_denied') and sync.last_denied > (sync.get('last_sync') or '') %}<div class="warn">The sync on your computer last tried {{ sync.last_denied[:16]|replace('T', ' ') }} UTC and its key was refused — it's using an older key (a new key replaces the old one). Make a new key below, then run the sync and paste it when asked (or run it with <code>-SetKey</code>).</div>{% endif %}
+  {% if admin %}
+  {% if new_key %}<div class="warn">New sync key — copy it now, it won't be shown again:<br><code style="user-select:all;word-break:break-all">{{ new_key }}</code><br>Paste it when the sync asks (first run, or with <code>-SetKey</code>). The old key stops working.</div>{% endif %}
+  <ol>
+    <li>Download <a href="{{ url_for('receipts_sync_script') }}">receipts-sync.ps1</a> and the one-click button <a href="{{ url_for('receipts_sync_launcher') }}">Receipts sync.cmd</a> into the <b>same folder</b> outside OneDrive (e.g. C:\business).</li>
+    <li>{% if sync.get('sha256') %}A sync key exists (made {{ sync.created[:10] }}).{% else %}Make a sync key:{% endif %}
+      <form method="post" class="mini" style="display:inline" {% if sync.get('sha256') %}data-confirm="Make a new key? The old one stops working."{% endif %}><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="sync-key"><button type="submit">{{ 'Make a new key' if sync.get('sha256') else 'Make a sync key' }}</button></form></li>
+    <li><b>Double-click “Receipts sync.cmd”</b> whenever you want waiting documents copied into OneDrive. The first time (or after a new key) it asks for the key — paste it and press Enter. For a desktop button: right-click it → Send to → Desktop (create shortcut).</li>
+  </ol>
+  {% else %}<p class="muted">The account owner runs the sync.</p>{% endif %}
+  </div>
+</details>
+
+<details class="card-sec" open id="missing">
+  <summary><span>Expenses without a receipt</span><span class="muted">last {{ r.days }} days · payroll, transfers and card fees left out</span></summary>
+  {% if r.missing %}
+  {% if editor %}<p class="hint" style="padding:0 14px">Drop a receipt (PDF or photo) straight onto its row, or click <b>Upload</b> on the row. It's attached to that expense and named the way the upload form above is set.</p>{% endif %}
+  <div class="scroll"><table>
+    <tr><th>Date</th><th class="n">Amount</th><th>Payee</th><th class="hide-sm">Category</th>{% if editor %}<th>Receipt</th>{% endif %}</tr>
+    {% for e in r.missing[:150] %}
+    <tr{% if editor %} class="droprow" title="Drop the receipt on this row"{% endif %}><td class="nowrap">{{ e.date|mdy }}</td><td class="n nowrap"><b>{{ (-e.amount)|money }}</b></td><td>{{ e.payee or e.description }}</td><td class="hide-sm muted">{{ e.category }}</td>
+      {% if editor %}<td><div class="rowacts">
+        <form method="post" enctype="multipart/form-data" class="rowup" data-upload-on-pick>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="upload">
+          <input type="hidden" name="entry_id" value="{{ e.id }}"><input type="hidden" name="date" value="{{ e.date }}">
+          <input type="hidden" name="vendor" value="{{ e.payee or e.description or '' }}"><input type="hidden" name="amount" value="{{ '%.2f'|format(-e.amount) }}">
+          <input type="hidden" name="ref" value="{{ e.check_no or '' }}"><input type="hidden" name="naming" value="rename">
+          <input type="hidden" name="next" value="{{ url_for('receipts_page', slug=c.slug) }}#missing">
+          <label class="filebtn">⬆ Upload<input type="file" name="file" accept="image/*,application/pdf" multiple data-drop></label>
+        </form>
+        <span class="rowlinks"><a class="small" href="{{ url_for('receipts_page', slug=c.slug, entry=e.id) }}#add" title="Add with a reference #, a note or a link">more…</a>
+        <form method="post" class="rowskip"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="skip"><input type="hidden" name="entry_id" value="{{ e.id }}"><button type="submit">not needed</button></form></span></div></td>{% endif %}</tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<div class="empty">Every expense in the last {{ r.days }} days has a receipt.</div>{% endif %}
+</details>
+
+<details class="card-sec" open>
+  <summary><span>Receipts</span><span class="muted">{{ r.receipts|length }}</span></summary>
+  {% if r.receipts %}
+  <div class="scroll"><table>
+    <tr><th>Date</th><th>Vendor</th><th class="n">Amount</th><th>Receipt</th><th>Transaction</th>{% if editor %}<th></th>{% endif %}</tr>
+    {% for x in r.receipts %}
+    <tr><td>{{ (x.date or x.created_at[:10])|mdy }}</td><td>{{ x.vendor or '—' }}{% if x.doc_type %} <span class="pill">{{ x.doc_type }}</span>{% endif %}{% if x.ref %} <span class="muted small">#{{ x.ref }}</span>{% endif %}{% if x.note %}<br><span class="small muted">{{ x.note }}</span>{% endif %}</td>
+      <td class="n">{{ x.amount|money if x.amount else '—' }}</td>
+      <td>{{ show(x) }}{% if x.status == 'pending' %} <span class="pill soon">waiting for the sync</span>{% elif x.status == 'filed' %} <span class="pill ok" title="{{ x.drive_path }}">in OneDrive</span>{% endif %}</td>
+      <td class="small">{% if x.entry_id %}{% if editor %}<a href="{{ url_for('entry_edit', slug=c.slug, eid=x.entry_id) }}">{% endif %}{{ x.e_date|mdy }} · {{ x.e_payee or x.e_desc }} · {{ (-x.e_amount)|money }}{% if editor %}</a>{% endif %}
+        {% elif x.bill_id %}<span class="pill {{ 'ok' if x.b_status == 'paid' else 'soon' }}">bill {{ x.b_amount|money }} due {{ x.b_due|mdy }}{{ ' · paid' if x.b_status == 'paid' else '' }}</span>
+        {% else %}<span class="pill soon">not matched</span>{% if editor %}
+        <form method="post" class="mini" style="display:inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="attach"><input type="hidden" name="id" value="{{ x.id }}">
+          <input name="entry" list="txn-list" placeholder="Match to… type vendor, date or amount" style="min-width:16em"><button type="submit">Match</button></form>{% endif %}{% endif %}</td>
+      {% if editor %}<td class="nowrap">{% if x.status != 'link' or true %}<details class="inline editdoc"><summary class="link">edit</summary>
+        <form method="post" class="form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="edit"><input type="hidden" name="id" value="{{ x.id }}">
+          <div class="row2"><label>Date <input type="date" name="date" value="{{ x.date or '' }}"></label><label>Amount <input name="amount" inputmode="decimal" value="{{ '%.2f'|format(x.amount) if x.amount else '' }}"></label></div>
+          <div class="row2"><label>Vendor <input name="vendor" maxlength="80" list="vendor-list" autocomplete="off" value="{{ x.vendor or '' }}"></label><label>Reference # <input name="ref" maxlength="40" value="{{ x.ref or '' }}"></label></div>
+          <label>Note <input name="note" maxlength="200" value="{{ x.note or '' }}"></label>
+          {% if x.status != 'link' %}<label class="check"><input type="checkbox" name="rename" value="1" checked> Rename the file to match (VendorName_date_Reference#){% if x.status == 'filed' %} — done in OneDrive by the sync next time{% endif %}</label>{% endif %}
+          {% if not x.entry_id and not x.bill_id %}<label class="check"><input type="checkbox" name="as_bill" value="1"> Unpaid invoice — add to upcoming bills (or match the open bill)</label>
+          <label>Due date <input type="date" name="due"></label>{% endif %}
+          <div class="actions"><button type="submit" class="primary-sm">Save</button></div>
+        </form></details>{% endif %}
+        <form method="post" class="mini" style="display:inline" data-confirm="Remove this receipt from Finance? The file stays in OneDrive."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="{{ x.id }}"><button type="submit" class="link">remove</button></form></td>{% endif %}</tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<div class="empty">No receipts yet.</div>{% endif %}
+</details>
+{% if editor %}<datalist id="vendor-list">{% for p in payees %}<option value="{{ p }}"></option>{% endfor %}</datalist><datalist id="txn-list">{% for e in r.choices %}<option value="#{{ e.id }} · {{ e.date|mdy }} · {{ (e.payee or e.description or '')[:40] }} · {{ '+' if e.amount > 0 else '−' }}{{ e.amount|abs|money }}{{ ' (money in)' if e.amount > 0 else '' }}"></option>{% endfor %}</datalist>{% endif %}
+{% endblock %}

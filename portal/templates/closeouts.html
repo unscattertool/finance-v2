@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} · missing closeouts{% endblock %}
+{% block heading %}{{ c.name }} · Shifts closeouts vs Linga{% endblock %}
+{% block sub %}<p>Who rang up sales in Linga on a day their Shifts closeout is missing or different · from {{ r.start|mdy }}</p>{% endblock %}
+{% block body %}
+<p><a href="{{ url_for('tips_page', slug=c.slug) }}">← Card deposits &amp; tips</a></p>
+{% if r.paper_until %}<p class="hint">Starts {{ r.start|mdy }}: through {{ r.paper_until|mdy }} closeouts were kept on paper and entered in Gusto, so Gusto is the record for those days. Sales rung under the owner's Linga login (shared by the bartenders) are compared with the Shifts bar closeouts as “{{ 'Bar register (shared login)' }}”.</p>{% endif %}
+{% if not r.have_sales %}<div class="warn">Import the Linga Sale Summary Report (Card deposits &amp; tips → Import data) to compare sales per person. Until then this uses card payments from the Batch Report, so it can only show missing closeouts, not differences.</div>{% endif %}
+<div class="tiles">
+  <div class="tile"><div class="k">Days with a gap</div><div class="v {{ 'neg' if r.missing_days }}">{{ r.missing_days }} of {{ r.days|length }}</div>
+    <div class="s">Business days since {{ r.start|mdy }}</div></div>
+  <div class="tile"><div class="k">POS sales with no closeout</div><div class="v {{ 'neg' if r.missing_total }}">{{ r.missing_total|money }}</div>
+    <div class="s">Person rang sales in Linga, no Shifts closeout with sales that day</div></div>
+  <div class="tile"><div class="k">People affected</div><div class="v">{{ r.people|length }}</div>
+    <div class="s">Missing or different closeouts</div></div>
+</div>
+
+<details class="card-sec" open>
+  <summary><span>By employee</span><span class="muted">{{ r.people|length }}</span></summary>
+  {% if r.people %}
+  <table>
+    <tr><th>Employee</th><th class="n">Closeouts missing</th><th class="n">Linga sales those days</th><th class="n">Card tips those days</th><th class="n">Days different</th><th class="n">Linga − Shifts</th><th>Missing dates (newest first)</th></tr>
+    {% for p in r.people %}
+    <tr><td>{{ p.name }}</td><td class="n {{ 'neg' if p.missing }}">{{ p.missing or '—' }}</td><td class="n">{{ p.missing_sales|money if p.missing else '—' }}</td>
+      <td class="n">{{ p.missing_tips|money if p.missing_tips else '—' }}</td><td class="n">{{ p.different or '—' }}</td>
+      <td class="n">{{ p.diff|money if p.different else '—' }}</td>
+      <td class="small">{% for d in p.dates[:12] %}{{ d|mdy }}{{ ', ' if not loop.last }}{% endfor %}{% if p.dates|length > 12 %} … +{{ p.dates|length - 12 }} more{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="empty">Every Linga server has a matching Shifts closeout.</div>{% endif %}
+  <p class="hint"><b>Missing</b> = sales in Linga that day under this person, but no Shifts closeout with sales for them (a $0 row for hours worked doesn't count). <b>Different</b> = both exist but Linga and Shifts gross sales differ by more than {{ '$1.00' }} — often sales rung under one name and closed out under another, or a partial closeout. A negative Linga − Shifts means Shifts shows more than Linga for them. People are matched through <a href="{{ url_for('tips_page', slug=c.slug) }}#names">Name matching</a>; fix a wrong match there.</p>
+</details>
+
+<details class="card-sec" open>
+  <summary><span>By day</span><span class="muted">{% if show == 'all' %}all days · <a href="?show=problems">show only days with a gap</a>{% else %}days with a gap · <a href="?show=all">show all days</a>{% endif %}</span></summary>
+  <table>
+    <tr><th>Date</th><th>Person</th><th>Status</th><th class="n">POS {{ "sales" if r.have_sales else "card" }}</th><th class="n">Checks</th><th class="n">Shifts sales</th><th class="n">Card tips (POS)</th><th class="n">Card tips (Shifts)</th><th class="n">Clocked in (h)</th><th>Names (POS | Shifts)</th></tr>
+    {% for d in r.days if show == 'all' or d.bad %}
+      {% for x in d.rows if show == 'all' or x.status != 'ok' %}
+      <tr><td>{% if loop.first %}<b>{{ d.date|mdy }}</b>{% endif %}</td><td>{{ x.name }}</td>
+        <td>{% if x.status == 'missing' %}<span class="pill late">No closeout{{ ' ($0 row)' if x.worked }}</span>{% elif x.status == 'different' %}<span class="pill soon">Different</span>{% elif x.status == 'shifts_only' %}<span class="pill">Shifts only</span>{% else %}<span class="pill ok">OK</span>{% endif %}</td>
+        <td class="n">{{ x.linga|money if x.linga else '—' }}</td><td class="n">{{ x.checks or '—' }}</td><td class="n">{{ x.shifts|money if x.shifts else '—' }}</td>
+        <td class="n">{{ x.tips|money if x.tips else '—' }}</td><td class="n">{{ x.shifts_tips|money if x.shifts_tips else '—' }}</td>
+        <td class="n">{{ '%.1f'|format(x.clock) if x.clock else '—' }}</td>
+        <td class="small muted">{{ x.linga_names or '—' }} | {{ x.shifts_names or '—' }}</td></tr>
+      {% endfor %}
+      <tr class="muted small"><td></td><td colspan="2">Day total</td><td class="n">{{ d.linga|money }}</td><td></td><td class="n">{{ d.shifts|money }}</td><td colspan="4"></td></tr>
+    {% endfor %}
+  </table>
+</details>
+{% endblock %}

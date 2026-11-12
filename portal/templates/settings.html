@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} · settings{% endblock %}
+{% block heading %}{{ c.name }} · client settings{% endblock %}
+{% block body %}
+<p><a href="{{ url_for('client_page', slug=c.slug) }}">← Back</a></p>
+<form method="post" class="form card wide">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <strong>Bank feed (SheetLink)</strong>
+  <label>Server key name <input name="key_env" value="{{ key_env }}" maxlength="60"></label>
+  <p class="hint">The SheetLink API key itself is stored only in cPanel → Setup Python App → Environment variables, under this name.</p>
+  {% if err %}<div class="warn">{{ err }}</div>{% endif %}
+  {% if accts %}
+  <p>Bank accounts that belong to {{ c.name }}:</p>
+  {% for a in accts %}
+  <label class="check"><input type="checkbox" name="accounts" value="{{ a.account_id }}" {{ 'checked' if a.account_id in chosen }}>
+    {{ a.institution }} · {{ a.name }} ••{{ a.mask }} <span class="muted">{{ a.type }}</span></label>
+  {% endfor %}
+  {% else %}
+  {% for a in chosen %}<input type="hidden" name="accounts" value="{{ a }}">{% endfor %}
+  {% endif %}
+  <label>Show bills due within (days) <input type="number" name="days_ahead" min="1" max="60" value="{{ c.get('days_ahead', 14) }}"></label>
+  {% if salaries is not none %}
+  <strong>Salaried pay (not on the POS time clock)</strong>
+  <label>One per line: name, annual salary <textarea name="salaries" rows="3" placeholder="Veronica, 50000">{{ salaries }}</textarea></label>
+  <p class="hint">Added to the payroll estimate as annual ÷ 26 each pay period. A name here is left out of the Time Clock hours so it isn't counted twice.</p>
+  {% endif %}
+  <div class="actions"><button type="submit" class="primary-sm">Save</button></div>
+</form>
+{% endblock %}

@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+{% set kname = dict(reports)[kind] %}
+{% block title %}{{ kname }} · {{ c.name }}{% endblock %}
+{% block heading %}{{ c.name }} · Reports{% endblock %}
+{% block sub %}<p>Cash basis, from the categorized Checkbook · data updated {{ s.receivedAt|when }}</p>{% endblock %}
+{% macro amt(v) %}{% if v > -0.005 and v < 0.005 %}<span class="muted">–</span>{% else %}<span class="{{ 'neg' if v < 0 }}">{{ v|money }}</span>{% endif %}{% endmacro %}
+{% macro drill(label, extra) %}<a class="drill" href="{{ url_for('report', slug=c.slug, kind='transactions') }}{{ drill_qs(args, extra) }}">{{ label }}</a>{% endmacro %}
+{% block body %}
+<nav class="tabs no-print">
+  <a href="{{ url_for('client_page', slug=c.slug) }}">← Dashboard</a>
+  {% for k, label in reports if k != 'sales-tax' or c.get('books') %}<a href="{{ url_for('report', slug=c.slug, kind=k) }}" class="{{ 'on' if k == kind }}">{{ label }}</a>{% endfor %}
+</nav>
+
+<form class="controls no-print" method="get">
+  {% if kind == 'balance-sheet' %}
+    <label>As of <input type="date" name="as_of" value="{{ as_of.isoformat() }}" max="{{ today.isoformat() }}"></label>
+  {% else %}
+    <label>Period
+      <input type="hidden" name="prev" value="{{ period }}">
+      <select name="period">{% for k, label in presets.items() %}<option value="{{ k }}" {{ 'selected' if k == period }}>{{ label }}</option>{% endfor %}</select>
+    </label>
+    <label>From <input type="date" name="from" value="{{ start.isoformat() }}"></label>
+    <label>To <input type="date" name="to" value="{{ end.isoformat() }}"></label>
+    {% if kind in ('pl', 'cash-flow') %}
+    <label>Show
+      <select name="view">
+        <option value="total" {{ 'selected' if view == 'total' }}>Total</option>
+        <option value="month" {{ 'selected' if view == 'month' }}>By month</option>
+      </select>
+    </label>
+    {% endif %}
+    {% if kind == 'vendors' %}
+    <label>List by
+      <select name="by" data-autosubmit>
+        <option value="payee" {{ 'selected' if by != 'category' }}>Vendor</option>
+        <option value="category" {{ 'selected' if by == 'category' }}>Category</option>
+      </select>
+    </label>
+    {% endif %}
+    {% if kind == 'transactions' %}
+    <label>Category
+      <select name="category"><option value="">All</option>{% for x in cats %}<option {{ 'selected' if x == args.get('category') }}>{{ x }}</option>{% endfor %}</select>
+    </label>
+    <label>Search <input type="search" name="q" value="{{ args.get('q', '') }}" placeholder="payee, memo, check #"></label>
+    {% if args.get('payee') %}<input type="hidden" name="payee" value="{{ args.get('payee') }}">{% endif %}
+    {% if args.get('group') %}<input type="hidden" name="group" value="{{ args.get('group') }}">{% endif %}
+    {% endif %}
+  {% endif %}
+  <button type="submit" class="primary-sm">Apply</button>
+  <a class="btn" href="{{ qs(args, format='csv') }}">Download CSV</a>
+  {% if kind != 'balance-sheet' %}<span class="hint">Pick a period, or type your own From and To dates.</span>{% endif %}
+</form>
+
+<section class="report">
+<h2>{{ kname }}
+  <span>{% if kind == 'balance-sheet' %}as of {{ as_of|mdy }}, {{ as_of.year }}{% else %}{{ start|mdy }}, {{ start.year }} – {{ end|mdy }}, {{ end.year }}{% endif %}</span>
+</h2>
+
+{# ------------------------------------------------------------ P&L #}
+{% if kind == 'pl' %}
+  {% set cols = data.columns %}{% set multi = cols|length > 1 %}
+  <div class="scroll"><table class="fin">
+    {% if multi %}<tr><th></th>{% for x in cols %}<th class="n">{{ x.label }}</th>{% endfor %}<th class="n">Total</th></tr>{% endif %}
+    {% for sec in data.sections %}
+      {% if sec.lines %}
+      <tr class="sec"><td colspan="{{ cols|length + 2 }}">{{ sec.title }}</td></tr>
+      {% for l in sec.lines %}
+      <tr><td class="ind">{{ drill(l.label, dict(category=l.label)) }}</td>
+        {% for v in l['values'] %}<td class="n">{{ amt(v) }}</td>{% endfor %}{% if multi %}<td class="n">{{ amt(l.total) }}</td>{% endif %}</tr>
+      {% endfor %}
+      <tr class="sub"><td>{{ sec.subtotal }}</td>{% for v in sec['values'] %}<td class="n">{{ amt(v) }}</td>{% endfor %}{% if multi %}<td class="n">{{ amt(sec.total) }}</td>{% endif %}</tr>
+      {% endif %}
+      {% if sec.group == 'Sales Tax Remitted' %}
+      <tr class="tot"><td>Net sales</td>{% for v in data.net_sales %}<td class="n">{{ amt(v) }}</td>{% endfor %}{% if multi %}<td class="n">{{ amt(data.net_sales|sum) }}</td>{% endif %}</tr>
+      {% elif sec.group == 'Cost of Goods Sold' %}
+      <tr class="tot"><td>Gross profit</td>{% for v in data.gross_profit %}<td class="n">{{ amt(v) }}</td>{% endfor %}{% if multi %}<td class="n">{{ amt(data.gross_profit|sum) }}</td>{% endif %}</tr>
+      {% elif sec.group == 'Operating Expenses' %}
+      <tr class="tot"><td>Operating income</td>{% for v in data.operating_income %}<td class="n">{{ amt(v) }}</td>{% endfor %}{% if multi %}<td class="n">{{ amt(data.operating_income|sum) }}</td>{% endif %}</tr>
+      {% endif %}
+    {% endfor %}
+    <tr class="grand"><td>Net income</td>{% for v in data.net_income %}<td class="n">{{ amt(v) }}</td>{% endfor %}{% if multi %}<td class="n">{{ amt(data.net_income|sum) }}</td>{% endif %}</tr>
+    <tr class="sec"><td colspan="{{ cols|length + 2 }}">Restaurant KPIs (share of net sales)</td></tr>
+    {% for label, vals in data.kpis %}<tr><td class="ind">{{ label }}</td>{% for v in vals %}<td class="n">{{ v|pct }}</td>{% endfor %}{% if multi %}<td></td>{% endif %}</tr>{% endfor %}
+    {% if data.other %}
+    <tr class="sec"><td colspan="{{ cols|length + 2 }}">Not in profit &amp; loss (cash in + / out −)</td></tr>
+    {% for l in data.other %}
+    <tr><td class="ind">{{ drill(l.label, dict(category=l.label)) }}{% if l.suspense %} <span class="pill soon">needs category</span>{% endif %}</td>
+      {% for v in l['values'] %}<td class="n">{{ amt(v) }}</td>{% endfor %}{% if multi %}<td class="n">{{ amt(l.total) }}</td>{% endif %}</tr>
+    {% endfor %}
+    {% endif %}
+  </table></div>
+  <div class="chartbox">
+    <div class="legend"><span><i class="k1"></i>Money in (sales + other income)</span><span><i class="k2"></i>Money out (costs, labor, expenses, sales tax)</span></div>
+    {{ chart|safe }}
+    <p class="hint">Last 6 months. Hover a bar for the amount. Owner money, loans and uncategorized items are left out.</p>
+  </div>
+
+{# ------------------------------------------------------------ Balance sheet #}
+{% elif kind == 'balance-sheet' %}
+  <table class="fin narrow">
+    <tr class="sec"><td colspan="2">Assets</td></tr>
+    {% for k, v in data.assets %}<tr><td class="ind">{{ k }}</td><td class="n">{{ amt(v) }}</td></tr>{% endfor %}
+    <tr class="tot"><td>Total assets</td><td class="n">{{ amt(data.total_assets) }}</td></tr>
+    <tr class="sec"><td colspan="2">Liabilities</td></tr>
+    {% for k, v in data.liabilities %}<tr><td class="ind">{{ drill(k, dict(category=('Card Tips Payable' if 'tips' in k else 'Loan Payables'), period='all')) }}</td><td class="n">{{ amt(v) }}</td></tr>{% else %}<tr><td class="ind muted">None recorded</td><td></td></tr>{% endfor %}
+    <tr class="sub"><td>Total liabilities</td><td class="n">{{ amt(data.total_liabilities) }}</td></tr>
+    <tr class="sec"><td colspan="2">Owner's equity</td></tr>
+    {% for k, v in data.equity %}<tr><td class="ind">{{ k }}</td><td class="n">{{ amt(v) }}</td></tr>{% endfor %}
+    <tr class="sub"><td>Total equity</td><td class="n">{{ amt(data.total_equity) }}</td></tr>
+    <tr class="grand"><td>Total liabilities &amp; equity</td><td class="n">{{ amt(data.total_liabilities + data.total_equity) }}</td></tr>
+  </table>
+  <div class="memo">
+    <strong>Notes</strong>
+    <ul>
+      <li>Cash basis: only money that moved through the bank. Unpaid bills, inventory and equipment aren't included.</li>
+      {% if data.memo.bank_balance is not none and as_of >= today %}<li>Bank balance today per the bank feed: {{ data.memo.bank_balance|money }}. The difference from cash per books is checks and payments not yet cleared (see Monthly Close in the workbook).</li>{% endif %}
+      {% if data.memo.cash_on_hand is not none %}<li>Cash drawer per the Cash tab: {{ data.memo.cash_on_hand|money }} (not included above).</li>{% endif %}
+      {% if data.memo.open_bills %}<li>Open bills entered on the Bills tab: {{ data.memo.open_bills|money }} (not included above).</li>{% endif %}
+      <li>"Uncategorized items" will move into the right lines once those Checkbook rows get a category.</li>
+    </ul>
+  </div>
+
+{# ------------------------------------------------------------ Cash flow #}
+{% elif kind == 'cash-flow' %}
+  {% set cols = data.columns %}{% set multi = cols|length > 1 %}
+  <div class="scroll"><table class="fin">
+    {% if multi %}<tr><th></th>{% for x in cols %}<th class="n">{{ x.label }}</th>{% endfor %}<th class="n">Period</th></tr>{% endif %}
+    <tr class="tot"><td>Beginning cash (per books)</td>{% for v in data.beginning %}<td class="n">{{ amt(v) }}</td>{% endfor %}{% if multi %}<td class="n">{{ amt(data.beginning[0]) }}</td>{% endif %}</tr>
+    {% for sec in data.sections %}{% if sec.lines %}
+      <tr class="sec"><td colspan="{{ cols|length + 2 }}">{{ sec.title }}</td></tr>
+      {% for l in sec.lines %}<tr><td class="ind">{{ l.label }}</td>{% for v in l['values'] %}<td class="n">{{ amt(v) }}</td>{% endfor %}{% if multi %}<td class="n">{{ amt(l.total) }}</td>{% endif %}</tr>{% endfor %}
+      <tr class="sub"><td>{{ sec.subtotal }}</td>{% for v in sec['values'] %}<td class="n">{{ amt(v) }}</td>{% endfor %}{% if multi %}<td class="n">{{ amt(sec.total) }}</td>{% endif %}</tr>
+    {% endif %}{% endfor %}
+    <tr class="tot"><td>Net change in cash</td>{% for v in data.net_change %}<td class="n">{{ amt(v) }}</td>{% endfor %}{% if multi %}<td class="n">{{ amt(data.total_change) }}</td>{% endif %}</tr>
+    <tr class="grand"><td>Ending cash (per books)</td>{% for v in data.ending %}<td class="n">{{ amt(v) }}</td>{% endfor %}{% if multi %}<td class="n">{{ amt(data.ending[-1]) }}</td>{% endif %}</tr>
+  </table></div>
+  <p class="hint">Money in is positive, money out is negative. "Per books" = the Checkbook, which includes checks written but not yet cleared.</p>
+
+{# ------------------------------------------------------------ Vendors #}
+{% elif kind == 'vendors' %}
+  {% set bycat = by == 'category' %}
+  <div class="tiles" style="padding:12px 14px 0;margin-bottom:8px">
+    <div class="tile"><div class="k">Per week</div><div class="v">{{ data.per_week|money }}</div><div class="s">average</div></div>
+    <div class="tile"><div class="k">Per pay period</div><div class="v">{{ data.per_period|money }}</div><div class="s">2 weeks</div></div>
+    <div class="tile"><div class="k">Per month</div><div class="v">{{ data.per_month|money }}</div><div class="s">average</div></div>
+    <div class="tile"><div class="k">Total</div><div class="v">{{ data.total|money }}</div><div class="s">{{ data.days }} days · {{ data['from']|mdy }} – {{ data['to']|mdy }}</div></div>
+  </div>
+  <div class="scroll"><table class="fin tight">
+    <tr><th>{{ 'Category' if bycat else 'Payee' }}</th><th class="hide-sm">{{ 'Main payees' if bycat else 'Main category' }}</th>      <th class="n">Per week</th><th class="n">Per pay period</th><th class="n">Per month</th><th class="n">Spent</th></tr>
+    {% for r in data.rows %}
+    <tr><td>{% if bycat %}{{ drill(r.name, dict(category=r.name)) }}{% else %}{{ drill(r.payee, dict(payee=r.payee)) }}{% endif %}<br><span class="small muted">{{ r.count }} payment{{ 's' if r.count != 1 }}</span></td>
+      <td class="hide-sm muted small">{% if bycat %}{{ r.top }}{% if r.vendors > 3 %} +{{ r.vendors - 3 }} more{% endif %}{% else %}{{ r.category }}{% endif %}</td>
+      <td class="n">{{ r.per_week|money }}</td><td class="n">{{ r.per_period|money }}</td><td class="n">{{ r.per_month|money }}</td>
+      <td class="n">{{ r.amount|money }}<br><span class="small muted">{{ r.share|pct }}</span></td></tr>
+    {% else %}<tr><td colspan="6" class="muted">No spending in this period.</td></tr>{% endfor %}
+    <tr class="grand"><td>Total spending</td><td class="hide-sm"></td><td class="n">{{ data.per_week|money }}</td><td class="n">{{ data.per_period|money }}</td>
+      <td class="n">{{ data.per_month|money }}</td><td class="n">{{ data.total|money }}</td></tr>
+  </table></div>
+  <p class="hint">Excludes owner draws, loans and transfers. Averages spread the period's spending over the {{ data.days }} days it covers
+    (up to the last bank sync); a pay period is 2 weeks. Longer periods give steadier averages.
+    Click a {{ 'category' if bycat else 'payee' }} to see each payment.
+    {% if c.get('books') %}<a href="{{ url_for('recurring_check', slug=c.slug) }}">Recurring payments check →</a>{% endif %}</p>
+
+{# ------------------------------------------------------------ Sales tax #}
+{% elif kind == 'sales-tax' %}
+  {% set t = data.total %}
+  <div class="tiles" style="padding:12px 14px 0;margin-bottom:8px">
+    <div class="tile"><div class="k">Net sales</div><div class="v">{{ t.net|money }}</div><div class="s">{{ t.days }} business day{{ 's' if t.days != 1 }} · before tax</div></div>
+    <div class="tile"><div class="k">Sales tax collected</div><div class="v">{{ t.sales_tax|money }}</div><div class="s">{% if t.rate %}{{ t.rate }}% of {{ 'taxable sales (alcohol excluded)' if data.hotel_any else 'net sales' }}{% endif %}</div></div>
+    <div class="tile"><div class="k">Alcohol taxes</div><div class="v">{{ t.liquor|money }}</div><div class="s">{% if data.hotel_any %}owed to the hotel (its liquor license): sales tax on alcohol + 13.5% liquor tax{% else %}13.5% mixed beverage tax{% endif %}{{ ' · partly estimated' if data.liquor_estimated }}</div></div>
+    <div class="tile"><div class="k">Paid to the state</div><div class="v">{{ t.paid|money }}</div><div class="s">for these months, paid the month after</div></div>
+  </div>
+  {% if data.owed %}{% set so = data.owed['Sales Tax Payable'] %}{% set ao = data.owed['Alc Sales Tax'] %}
+  <p class="sumline">Tax payable on the books (all time, from the sales tax split on every sales deposit − payments):
+    state sales tax <b>{{ so.owed|money }}</b> ({{ so.collected|money }} in deposits − {{ so.paid|money }} paid) ·
+    alcohol taxes{{ ' (owed to the hotel while it holds the liquor license)' if data.hotel_any }} <b>{{ ao.owed|money }}</b> ({{ ao.collected|money }} − {{ ao.paid|money }}) ·
+    total <b>{{ (so.owed + ao.owed)|money }}</b>.</p>
+  {% endif %}
+  {% if data.missing %}
+  <p class="sumline"><span class="pill late">{{ data.missing|length }} day{{ 's' if data.missing|length != 1 }} with sales but no tax figures</span>
+    — not in the totals: {% for x in data.missing[:15] %}{{ x.date|mdy }} ({{ (x.gross or x.card)|money }}){{ ', ' if not loop.last }}{% endfor %}{% if data.missing|length > 15 %} and {{ data.missing|length - 15 }} more (see Download CSV){% endif %}.
+    Import that day's Heartland <b>Daily Summary</b> or <b>Taxes</b> report (Shifts → POS import, or Finance → Card deposits &amp; tips → Import data).</p>
+  {% endif %}
+  <h3 style="margin:14px 14px 6px" id="returns">Filed returns</h3>
+  {% if data.returns and data.returns.rows %}
+  <div class="scroll"><table class="fin tight">
+    <tr><th>Period</th><th>Return</th><th class="n">Sales on return</th><th class="n" title="POS net sales; alcohol sales left out while the hotel holds the liquor license">POS taxable sales</th><th class="n">Tax due</th><th class="n">POS tax collected</th>
+      <th class="n">Interest + penalty</th><th class="n">Total due</th><th>Filed</th><th>Paid</th></tr>
+    {% for r in data.returns.rows|reverse %}
+    <tr><td>{{ r.period_end[:7] }}</td><td class="small">{{ 'Sales tax' if r.kind == 'sales' else 'Mixed beverage' }}</td>
+      <td class="n">{{ r.total_sales|money }}</td>
+      <td class="n">{% if r.pos_net is not none %}{{ r.pos_net|money }}{% if r.sales_diff and r.sales_diff|abs > 1 %}<br><span class="small {{ 'neg' if r.sales_diff < 0 }}">{{ r.sales_diff|money }} on return</span>{% endif %}{% else %}–{% endif %}</td>
+      <td class="n">{{ r.tax_due|money }}</td>
+      <td class="n">{% if r.pos_tax is not none %}{{ r.pos_tax|money }}{% if r.tax_diff and r.tax_diff|abs > 1 %}<br><span class="small {{ 'neg' if r.tax_diff < 0 }}">{{ r.tax_diff|money }} on return</span>{% endif %}{% else %}–{% endif %}</td>
+      <td class="n">{{ amt(r.interest + r.penalty) }}</td><td class="n"><b>{{ r.total_due|money }}</b></td>
+      <td class="small">{{ r.received|mdy if r.received else '–' }}{% if r.received and r.due_date and r.received > r.due_date %} <span class="pill late">late</span>{% endif %}</td>
+      <td class="small">{% if r.paid is not none %}{{ r.paid_date|mdy }} {{ r.paid|money }}{% if (r.paid - r.total_due)|abs > 0.01 %} <span class="pill soon">{{ (r.paid - r.total_due)|money }}</span>{% endif %}{% elif r.total_due > 0 %}<span class="pill late">no payment found</span>{% else %}–{% endif %}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% if data.returns.unmatched %}<p class="sumline"><span class="pill soon">Payments that match no filed return</span>
+    {% for p in data.returns.unmatched %}{{ p.date|mdy }} {{ (-p.amount)|money }} ({{ p.payee or p.description }}{% if p.check_no %}, check #{{ p.check_no }}{% endif %}; {{ p.category }}){{ ', ' if not loop.last }}{% endfor %}
+    — these keep their own category. Import the return they paid (e.g. the mixed beverage returns), or recategorize them if they weren't tax payments.</p>{% endif %}
+  {% else %}<p class="hint" style="padding:0 14px">No filed returns imported yet.</p>{% endif %}
+  {% if can_edit %}
+  <form method="post" action="{{ url_for('tax_returns_upload', slug=c.slug) }}" enctype="multipart/form-data" class="mini no-print" style="padding:0 14px 8px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="period" value="{{ period }}">
+    <label>Import filed returns (OkTAP PDF copies — sales tax and mixed beverage) <input type="file" name="files" accept=".pdf,application/pdf" multiple required></label>
+    <button type="submit" class="primary-sm">Import</button></form>
+  {% endif %}
+  <p class="hint" style="padding:0 14px">Each payment to the Tax Commission is tied to the return it paid (same total, or between the return's tax due and its total due). The return's tax due goes to Sales Tax Payable (sales tax return) or Alc Sales Tax (mixed beverage return); interest, penalty and anything paid above them go to Tax Penalties &amp; Interest (an expense).
+    “POS taxable sales” = POS net sales minus alcohol sales while the hotel holds the liquor license (the hotel reports those sales and pays both alcohol taxes); “POS tax collected” = the restaurant's own sales tax. A return above the POS (e.g. June and July) included alcohol sales the hotel also reports.</p>
+  {% if can_edit %}
+  <form method="post" action="{{ url_for('liquor_license', slug=c.slug) }}" class="mini no-print" style="padding:0 14px 8px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="period" value="{{ period }}">
+    <label>Restaurant's own liquor license from <input type="date" name="date" value="{{ data.license_from or '' }}"></label>
+    <button type="submit" class="primary-sm">Save</button>
+    <span class="hint">{% if data.license_from %}From {{ data.license_from|mdy }} the sales tax on alcohol is the restaurant's (its sales tax return) and only the 13.5% liquor tax is separate.{% else %}Not set: the hotel's license — alcohol sales and both alcohol taxes are the hotel's.{% endif %} Leave empty to clear.</span>
+  </form>
+  {% endif %}
+  <h3 style="margin:14px 14px 6px">By month (filing period)</h3>
+  <div class="scroll"><table class="fin tight">
+    <tr><th>Month</th><th class="n">Days</th><th class="n">Gross receipts</th><th class="n">Net sales</th><th class="n">Sales tax</th><th class="n hide-sm">Rate</th>
+      <th class="n">Alcohol taxes</th><th class="n">Total tax</th><th class="n">Paid next month</th><th class="n">Still to pay</th></tr>
+    {% for m in data.months %}
+    <tr><td>{{ m.label }}<br><span class="small muted">usually due {{ m.due|mdy }}{% if m.missing %} · <span class="neg">{{ m.missing }} day{{ 's' if m.missing != 1 }} missing</span>{% endif %}</span></td>
+      <td class="n">{{ m.days }}</td><td class="n">{{ m.gross|money }}</td><td class="n">{{ m.net|money }}</td><td class="n">{{ m.sales_tax|money }}</td>
+      <td class="n hide-sm">{{ '%.2f%%'|format(m.rate) if m.rate else '–' }}</td><td class="n">{{ m.liquor|money }}</td><td class="n"><b>{{ m.tax|money }}</b></td>
+      <td class="n">{{ amt(m.paid_next) }}</td><td class="n {{ 'neg' if m.owed > 0.5 }}">{{ m.owed|money }}</td></tr>
+    {% else %}<tr><td colspan="10" class="muted">No sales with tax figures in this period.</td></tr>{% endfor %}
+    {% if data.months|length > 1 %}
+    <tr class="grand"><td>Total</td><td class="n">{{ t.days }}</td><td class="n">{{ t.gross|money }}</td><td class="n">{{ t.net|money }}</td><td class="n">{{ t.sales_tax|money }}</td>
+      <td class="n hide-sm">{{ '%.2f%%'|format(t.rate) if t.rate else '–' }}</td><td class="n">{{ t.liquor|money }}</td><td class="n">{{ t.tax|money }}</td><td class="n">{{ t.paid|money }}</td>
+      <td class="n">{{ (t.tax - t.paid)|money }}</td></tr>
+    {% endif %}
+  </table></div>
+  <details class="card-sec" style="margin-top:14px"><summary><span>By day</span><span class="muted">{{ data.days|length }} days</span></summary>
+  <div class="scroll"><table class="fin tight">
+    <tr><th>Date</th><th class="hide-sm">From</th><th class="n">Gross receipts</th><th class="n">Net sales</th><th class="n">Sales tax</th><th class="n">Alcohol taxes</th><th class="n">Total tax</th></tr>
+    {% for x in data.days|reverse %}
+    <tr><td>{{ x.date|mdy }}</td><td class="hide-sm muted small">{{ x.source }}</td><td class="n">{{ x.gross|money }}</td><td class="n">{{ x.net|money }}</td>
+      <td class="n">{{ x.sales_tax|money }}</td><td class="n">{{ amt(x.liquor) }}{% if x.liquor and not x.liquor_actual %} <span class="muted small" title="Estimated">est.</span>{% endif %}</td><td class="n">{{ x.tax|money }}</td></tr>
+    {% endfor %}
+  </table></div></details>
+  <p class="hint">Gross receipts = what customers paid including tax, before tips. Net sales = after discounts, before tax.
+    Each day comes from the most complete source: Heartland Daily Summary / Taxes reports (from 10/29), the Linga Sale Summary report (before), else Shifts closeouts when every closeout that day has its tax filled in.
+    Alcohol taxes = the 13.5% liquor (mixed beverage) tax — the Heartland Taxes report's liquor tax when imported, else 13.5% of the Daily Summary's alcohol sales (marked est.); for Linga days spread from Linga's liquor tax total — plus, while the hotel holds the liquor license, the sales tax charged on alcohol (Linga days: Linga's Alc Sales Tax in the same proportion; Heartland days: 6.05% of alcohol sales). Those are the hotel's to report and pay, so they are owed to the hotel, not on the restaurant's sales tax return.
+    "Paid next month" = bank payments categorized Sales Tax Payable or Alc Sales Tax dated in the following month. Download CSV gives the daily detail.
+    This is a working summary for filing — check it against the POS before you file.</p>
+
+{# ------------------------------------------------------------ Transactions #}
+{% else %}
+  <p class="sumline">{{ data.rows|length }} transactions · in {{ data['in']|money }} · out {{ data.out|money }}
+    {% if args.get('payee') %} · payee: <strong>{{ args.get('payee') }}</strong> <a href="{{ qs(args, payee=None) }}">clear</a>{% endif %}
+    {% if args.get('group') %} · group: <strong>{{ args.get('group') }}</strong> <a href="{{ qs(args, group=None) }}">clear</a>{% endif %}
+    {% if data.not_cleared %} · <span class="pill soon">{{ data.not_cleared }} not cleared · {{ data.not_cleared_total|money }}</span>{% endif %}</p>
+  <div class="scroll"><table class="fin">
+    <tr><th>Date</th><th>Description</th><th class="hide-sm">Payee</th><th class="hide-sm">Category</th><th class="n">Amount</th></tr>
+    {% for r in data.rows[:500] %}
+    <tr{% if r.state %} class="not-cleared"{% endif %}><td>{{ r.date|mdy }}</td><td>{{ r.description }}{% if r.check %} <span class="muted">#{{ r.check }}</span>{% endif %}
+      {% if r.state == 'open' %} <span class="pill soon" title="Entered by hand; the bank hasn't shown it yet">Not cleared</span>{% elif r.state == 'pending' %} <span class="pill soon" title="The bank shows it as pending; not posted yet">Pending at bank</span>{% endif %}</td>
+      <td class="hide-sm">{{ r.payee }}{% if recs and recs.get(r.id) %} <a href="{{ url_for('receipt_file', slug=c.slug, rid=recs[r.id][0].id) if recs[r.id][0].status != 'link' else url_for('entry_edit', slug=c.slug, eid=r.id) }}" title="Receipt" class="pill ok">receipt</a>{% elif can_edit and r.id %} <a class="small muted" href="{{ url_for('receipts_page', slug=c.slug, entry=r.id) }}#add">{{ '+ receipt' if r.amount < 0 else '+ doc' }}</a>{% endif %}</td><td class="hide-sm muted">{% if can_edit and r.id %}<a class="drill" href="{{ url_for('entry_edit', slug=c.slug, eid=r.id) }}">{{ r.category }}</a>{% else %}{{ r.category }}{% endif %}
+        {% if r.partial %}<br><span class="small">part of the {{ r.bank_amount|money }} bank transaction</span>{% elif r.parts %}<br><span class="small">{% for p in r.parts %}{{ p.category }} {{ p.amount|money }}{{ ' · ' if not loop.last }}{% endfor %}</span>{% endif %}</td>
+      <td class="n">{{ amt(r.amount) }}{% if r.partial %}<br><span class="small muted">bank {{ r.bank_amount|money }}</span>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="5" class="muted">Nothing matches.</td></tr>{% endfor %}
+  </table></div>
+  {% if data.rows|length > 500 %}<p class="hint">Showing the latest 500. Download CSV for all of them.</p>{% endif %}
+  {% if data.not_cleared %}<p class="hint">Highlighted rows haven't cleared the bank: <b>Not cleared</b> = a check or payment entered by hand that the bank hasn't shown yet (open it to void it if it was never sent); <b>Pending at bank</b> = the bank shows it but hasn't posted it.</p>{% endif %}
+{% endif %}
+</section>
+{% endblock %}

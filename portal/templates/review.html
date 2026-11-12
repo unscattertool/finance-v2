@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} · needs category{% endblock %}
+{% block heading %}{{ c.name }} · needs category{% endblock %}
+{% block body %}
+<p><a href="{{ url_for('client_page', slug=c.slug) }}">← Back</a></p>
+<section>
+  <h2>Uncategorized <span>{{ rows|length }}</span></h2>
+  {% if rows %}
+  <table>
+    <tr><th>Date</th><th>Bank description</th><th class="n">Amount</th><th>Category</th></tr>
+    {% for e in rows %}
+    <tr><td>{{ e.date|mdy }}</td>
+      <td><a class="drill" href="{{ url_for('entry_edit', slug=c.slug, eid=e.id, next=url_for('review', slug=c.slug)) }}">{{ e.payee or e.description }}</a>
+        {% if e.payee %}<div class="muted small">{{ e.description }}</div>{% endif %}</td>
+      <td class="n {{ 'neg' if e.amount < 0 }}">{{ e.amount|money }}</td>
+      <td><form method="post" action="{{ url_for('entry_edit', slug=c.slug, eid=e.id) }}" class="mini">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="next" value="{{ url_for('review', slug=c.slug) }}">
+        <input type="hidden" name="payee" value="{{ e.payee or '' }}"><input type="hidden" name="memo" value="{{ e.memo or '' }}"><input type="hidden" name="check_no" value="{{ e.check_no or '' }}">
+        <select name="category">{% for x in cats %}<option {{ 'selected' if x == e.category }}>{{ x }}</option>{% endfor %}</select>
+        <button type="submit">Save</button></form></td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="empty">All caught up.</div>{% endif %}
+</section>
+<p class="hint">Open an item to also set the payee and save a rule so future ones are categorized automatically.</p>
+{% endblock %}

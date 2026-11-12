@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} · edit{% endblock %}
+{% block heading %}{{ c.name }}{% endblock %}
+{% block sub %}<p>{{ e.date|mdy }} · {{ e.amount|money }}{% if e.check_no %} · check #{{ e.check_no }}{% endif %}</p>{% endblock %}
+{% block body %}
+<form method="post" class="form card wide">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="next" value="{{ nxt }}">
+  <p class="muted">{% if bt %}Bank: {{ bt.description }}{% if bt.pending %} (pending){% endif %}{% else %}Entered by hand by {{ e.created_by }}; {{ 'cleared' if e.status == 'cleared' else 'not at the bank yet' if e.status == 'open' else e.status }}.{% endif %}</p>
+  {% if not bt %}
+  <div class="row2">
+    <label>Date <input type="date" name="date" value="{{ e.date }}"></label>
+    <label>Amount <input name="amount" inputmode="decimal" value="{{ '%.2f'|format(e.amount|abs) }}"></label>
+  </div>
+  {% endif %}
+  <div class="row2">
+    <label>Payee <input name="payee" list="payees" maxlength="100" value="{{ e.payee or '' }}" autocomplete="off"></label>
+    <label>Check # <input name="check_no" maxlength="12" value="{{ e.check_no or '' }}"></label>
+  </div>
+  {% if splits %}
+  <div class="warn">Split automatically — the bank amount stays {{ e.amount|money }}:
+    {% for x in splits %}<br>{{ x.category }} {{ x.amount|money }}{% if x.memo %} <span class="muted small">({{ x.memo }})</span>{% endif %}{% endfor %}
+    <br>Remainder {{ (e.amount - splits|sum(attribute='amount'))|money }} in the category below. <a href="{{ url_for('tips_page', slug=c.slug) }}">Card deposits &amp; tips</a></div>
+  {% endif %}
+  <label>Category <select name="category">{% for x in cats %}<option {{ 'selected' if x == e.category }}>{{ x }}</option>{% endfor %}</select></label>
+  <label>Memo <input name="memo" maxlength="200" value="{{ e.memo or '' }}"></label>
+  {% if e.description %}
+  <label class="check"><input type="checkbox" name="rule" value="1"> Always use this payee and category when the bank description contains
+    <input name="pattern" value="{{ pattern }}" maxlength="80" size="24"></label>
+  {% endif %}
+  <datalist id="payees">{% for p in payees %}<option value="{{ p }}">{% endfor %}</datalist>
+  <div class="actions">
+    <button type="submit" class="primary-sm">Save</button>
+    <a class="btn" href="{{ nxt or url_for('client_page', slug=c.slug) }}">Cancel</a>
+    {% if not bt and e.status != 'void' %}<button type="submit" name="action" value="void" class="danger">Void</button>{% endif %}
+  </div>
+</form>
+{% if true %}
+<div class="form card wide" id="receipt">
+  <strong>{{ "Receipt" if e.amount < 0 else "Document (credit memo, refund receipt …)" }}</strong>
+  {% for r in recs %}<p>{% if r.status == 'link' %}<a href="{{ r.link if r.link.startswith('http') else '#' }}" rel="noopener noreferrer" target="_blank">{{ r.link }}</a>{% else %}<a href="{{ url_for('receipt_file', slug=c.slug, rid=r.id) }}" target="_blank">{{ r.filename }}</a>{% if r.status == 'pending' %} <span class="pill soon">waiting for the sync to OneDrive</span>{% endif %}{% endif %}</p>{% endfor %}
+  <form method="post" action="{{ url_for('receipts_page', slug=c.slug) }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="upload">
+    <input type="hidden" name="entry_id" value="{{ e.id }}"><input type="hidden" name="date" value="{{ e.date }}">
+    <input type="hidden" name="vendor" value="{{ e.payee or e.description }}"><input type="hidden" name="amount" value="{{ '%.2f'|format(e.amount|abs) }}">
+    <input type="hidden" name="next" value="{{ url_for('entry_edit', slug=c.slug, eid=e.id) }}#receipt">
+    <label class="dropzone"><span><b>{{ 'Drop another receipt here' if recs else 'Drop the receipt here (PDF or photo)' }}</b> or <u>choose a file</u></span><input type="file" name="file" accept="image/*,application/pdf" multiple required data-drop><span class="small muted" data-drop-list></span></label>
+    <label>Reference # <input name="ref" maxlength="40" placeholder="invoice / receipt / order # (if any)" value="{{ e.check_no or '' }}"></label>
+    <div class="naming"><span class="small">File name:</span>
+      <label class="check"><input type="radio" name="naming" value="rename" checked> Rename to VendorName_date_Reference#</label>
+      <label class="check"><input type="radio" name="naming" value="keep"> Keep the file's own name</label></div>
+    <p class="hint" data-name-preview data-base="{{ rfolder or '' }}">Saved as <b data-name-out>VendorName_YYYY-MM-DD_Reference#</b><span data-name-note></span></p>
+    <div class="actions"><button type="submit" class="primary-sm">Upload receipt</button> <a href="{{ url_for('receipts_page', slug=c.slug, entry=e.id) }}#add">or save a link instead</a></div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

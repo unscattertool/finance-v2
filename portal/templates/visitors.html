@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Visitors{% endblock %}
+{% block heading %}Visitors &amp; page views{% endblock %}
+{% block sub %}<p>Who opened Finance, Shifts and the sign-in page, and which pages they used · times in Central time</p>{% endblock %}
+{% block body %}
+<p><a href="{{ url_for('home') }}">← Back</a></p>
+<form class="controls no-print" method="get">
+  <label>Period <select name="days" data-autosubmit>{% for d, l in [(1, 'Today'), (7, 'Last 7 days'), (30, 'Last 30 days'), (90, 'Last 90 days')] %}<option value="{{ d }}"{{ ' selected' if d == days }}>{{ l }}</option>{% endfor %}</select></label>
+  <label>App <select name="app" data-autosubmit><option value="">All apps</option>{% for k, l in apps.items() %}<option value="{{ k }}"{{ ' selected' if args.get('app') == k }}>{{ l }}</option>{% endfor %}</select></label>
+  <label>Person <select name="person" data-autosubmit><option value="">Everyone</option>{% for p in r.all_people %}<option value="{{ p }}"{{ ' selected' if args.get('person') == p }}>{{ r.names.get(p) or p }}</option>{% endfor %}</select></label>
+  <label>Show <select name="bots" data-autosubmit><option value="">Everything</option><option value="hide"{{ ' selected' if args.get('bots') == 'hide' }}>Hide likely bots</option></select></label>
+  <button type="submit" class="primary-sm">Apply</button>
+</form>
+
+<div class="tiles">
+  <div class="tile"><div class="k">Page views · all time</div><div class="v">{{ '{:,}'.format(r.total.all) }}</div>
+    <div class="s">Finance {{ '{:,}'.format(r.total.finance) }} · Shifts {{ '{:,}'.format(r.total.shifts) }} · Sign-in {{ '{:,}'.format(r.total.signin) }}{% if r.total.since %} · since {{ r.total.since.strftime('%b %-d') }}{% endif %}</div></div>
+  <div class="tile"><div class="k">Visits</div><div class="v">{{ r.visits }}</div><div class="s">{{ r.views }} page views in this period</div></div>
+  <div class="tile"><div class="k">People</div><div class="v">{{ r.people }}</div><div class="s">different visitors in this period</div></div>
+  <div class="tile"><div class="k">Today</div><div class="v">{{ r.today_visits }}</div><div class="s">visit{{ '' if r.today_visits == 1 else 's' }} by {{ r.today_people }} {{ 'person' if r.today_people == 1 else 'people' }}</div></div>
+</div>
+
+<details class="card-sec" open>
+  <summary><span>Visits — who, from where, and where they went</span><span class="muted">{{ r.trips|length }} shown · {{ r.signed_trips }} signed in · {{ r.bots }} likely bots</span></summary>
+  <div class="scroll"><table>
+    <tr><th>When</th><th>Who</th><th>From</th><th>Where they went</th><th>Result</th></tr>
+    {% for j in r.trips %}
+    <tr{% if j.bot %} class="muted"{% endif %}><td class="small">{{ j.local.strftime('%b %-d, %-I:%M %p') }}{% if j.minutes %}<br><span class="muted">{{ j.minutes }} min</span>{% endif %}</td>
+      <td>{% if j.email %}<a href="?{{ {'days': days, 'person': j.email}|urlencode }}">{{ j.name or j.email }}</a>{% else %}<span class="muted">Not signed in</span>{% endif %}
+        <br><span class="small muted">{{ j.device }}</span></td>
+      <td class="small">{{ j.place or '—' }}{% if j.network %}<br><span class="muted">{{ j.network }}</span>{% endif %}<br><span class="muted">{{ j.ips|join(', ') }}</span></td>
+      <td class="small">{{ j.steps|join(' → ') }}</td>
+      <td class="small">{% if j.bot %}<span class="pill">Likely bot</span><br>{% elif j.signed_in %}<span class="pill ok">Signed in</span><br>{% endif %}{{ j.result if not j.signed_in else '' }}</td></tr>
+    {% else %}<tr><td colspan="5" class="muted">No visits in this period.</td></tr>{% endfor %}
+  </table></div>
+  <p class="hint">"Likely bot" = never signed in, and switched internet addresses mid-visit (a rotating proxy), came from a data-center network, or used an automated or bare Linux browser.
+    Places are approximate, from the internet address (city of the provider, not a street address).</p>
+</details>
+
+{% if r.days > 1 %}
+<details class="card-sec" open>
+  <summary><span>Page views by day</span><span class="muted">{{ r.views }}</span></summary>
+  <div class="scroll"><table>
+    <tr><th>Day</th><th class="n">Visits</th><th class="n">People</th><th class="n">Views</th><th style="width:45%"></th></tr>
+    {% for d in r.daily|reverse %}<tr><td>{{ d.date.strftime('%a %b %-d') }}</td><td class="n">{{ d.visits }}</td><td class="n">{{ d.people }}</td><td class="n">{{ d.views }}</td>
+      <td>{% if d.views %}<span class="bar" style="width:{{ d.pct }}%;max-width:100%"></span>{% endif %}</td></tr>{% endfor %}
+  </table></div>
+</details>
+{% endif %}
+
+<details class="card-sec" open>
+  <summary><span>By app</span><span class="muted">{{ r.visits }} visits</span></summary>
+  <table>
+    <tr><th>App</th><th class="n">Visits</th><th class="n">People</th><th class="n">Page views</th></tr>
+    {% for a in r.by_app %}<tr><td><a href="?{{ {'days': days, 'app': a.app, 'person': args.get('person', '')}|urlencode }}">{{ a.label }}</a></td><td class="n">{{ a.visits }}</td><td class="n">{{ a.people }}</td><td class="n">{{ a.views }}</td></tr>{% endfor %}
+  </table>
+</details>
+
+<details class="card-sec" open>
+  <summary><span>People</span><span class="muted">{{ r.people_rows|length }}</span></summary>
+  <div class="scroll"><table>
+    <tr><th>Person</th><th>Apps</th><th class="n">Visits</th><th class="n">Page views</th><th class="hide-sm">Device</th><th>Last seen</th></tr>
+    {% for p in r.people_rows %}<tr><td>{% if p.email %}<a href="?{{ {'days': days, 'app': args.get('app', ''), 'person': p.email}|urlencode }}">{{ p.name or p.email }}</a>{% if p.name %}<br><span class="small muted">{{ p.email }}</span>{% endif %}{% else %}<span class="muted">{{ p.who }}</span><br><span class="small muted">not signed in{% if p.place %} · {{ p.place }}{% endif %}{% if p.network %} · {{ p.network }}{% endif %}</span>{% endif %}</td>
+      <td class="small">{{ p.apps }}</td><td class="n">{{ p.visits }}</td><td class="n">{{ p.views }}</td><td class="hide-sm small">{{ p.devices }}</td><td class="small">{{ p.last_local.strftime('%b %-d, %-I:%M %p') }}</td></tr>
+    {% else %}<tr><td colspan="6" class="muted">No visits in this period yet.</td></tr>{% endfor %}
+  </table></div>
+</details>
+
+<details class="card-sec" open>
+  <summary><span>Top pages</span><span class="muted">{{ r.top_pages|length }}</span></summary>
+  <div class="scroll"><table>
+    <tr><th>Page</th><th>App</th><th class="n">Views</th><th class="n">People</th></tr>
+    {% for p in r.top_pages %}<tr><td>{{ p.page }}</td><td class="small">{{ p.app }}</td><td class="n">{{ p.views }}</td><td class="n">{{ p.people }}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">No page views in this period yet.</td></tr>{% endfor %}
+  </table></div>
+</details>
+
+<details class="card-sec">
+  <summary><span>Recent activity</span><span class="muted">latest {{ r.recent|length }}</span></summary>
+  <div class="scroll"><table>
+    <tr><th>When</th><th>Person</th><th>App</th><th>Page / event</th><th class="hide-sm">Device</th><th class="hide-sm">From</th></tr>
+    {% for e in r.recent %}<tr><td class="small">{{ e.local.strftime('%b %-d, %-I:%M %p') }}</td><td class="small">{{ r.names.get(e.email) or e.who }}</td>
+      <td class="small">{{ apps[e.app] }}</td><td>{{ e.page }}</td><td class="hide-sm small">{{ e.device }}</td><td class="hide-sm small">{{ e.place }}</td></tr>{% endfor %}
+  </table></div>
+</details>
+<p class="hint">A visit is one person's activity in one app with no break longer than 30 minutes. Finance counts every page and download;
+  Shifts counts opening the app and each tab; Sign-in counts the sign-in pages and each sign-in. Counting started {{ r.total.since.strftime('%b %-d, %Y') if r.total.since else 'today' }}.</p>
+{% endblock %}

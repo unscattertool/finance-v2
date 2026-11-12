@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} · checks vs payroll{% endblock %}
+{% block heading %}{{ c.name }} · checks vs payroll{% endblock %}
+{% block sub %}<p>Every hand-written check, matched to Gusto paper paychecks and the tips in them</p>{% endblock %}
+{% block body %}
+<p><a href="{{ url_for('client_page', slug=c.slug) }}">← Back</a></p>
+<div class="tiles">
+  <div class="tile"><div class="k">Checks written</div><div class="v">{{ r.rows|length }}</div><div class="s">{{ r.total|money }} total</div></div>
+  <div class="tile"><div class="k">Matched to Gusto</div><div class="v">{{ r.counts.payroll + r.counts.payroll_diff + r.counts.possible }}</div>
+    <div class="s">{{ r.payroll_total|money }} · paychecks and cash-tip checks</div></div>
+  <div class="tile"><div class="k">Gusto checks not cashed</div><div class="v {{ 'neg' if r.outstanding }}">{{ r.outstanding|length }}</div>
+    <div class="s">{{ r.outstanding_total|money }} not seen at the bank</div></div>
+  <div class="tile"><div class="k">Staff paid outside Gusto</div><div class="v">{{ r.outside_total|money }}</div>
+    <div class="s">plus {{ r.before_total|money }} before payroll started ({{ r.first_pay|mdy if r.first_pay else '—' }})</div></div>
+</div>
+
+{% macro gusto(x) %}{% set p = x.paycheck %}{% if p %}{{ p.name }} · {{ p.run }} {{ p.pay_day|mdy }}{% if p.also %} + {{ p.also.run }} {{ p.also.pay_day|mdy }}{% endif %}
+  <span class="muted small">({{ {'net': 'net pay', 'cash': 'cash tips', 'net+cash': 'net + cash tips'}[p.what] }} {{ p.expected|money }}{% if p.tips %} · paycheck tips {{ p.tips|money }}{% endif %}{% if p.cash_tips and p.what != 'net' %} · cash tips {{ p.cash_tips|money }}{% endif %})</span>{% else %}—{% endif %}{% endmacro %}
+{% macro pill(x) %}{% set lab = {'payroll': ('ok', 'Gusto paycheck'), 'payroll_diff': ('soon', 'Amount differs'), 'possible': ('soon', 'Possible match'), 'staff_no_gusto': ('late', 'Staff · not in Gusto'), 'before_payroll': ('', 'Staff · before payroll'), 'other': ('', 'Vendor / other')}[x.status] %}<span class="pill {{ lab[0] }}">{{ lab[1] }}</span>{% endmacro %}
+
+<details class="card-sec" open>
+  <summary><span>Needs attention</span><span class="muted">{{ r.issues }}</span></summary>
+  <table>
+    <tr><th>Date</th><th>Check #</th><th>Payee (books)</th><th class="n">Amount</th><th>Category</th><th>Status</th><th>Gusto</th><th>What to check</th></tr>
+    {% for x in r.rows if x.issues %}
+    <tr><td><a href="{{ url_for('entry_edit', slug=c.slug, eid=x.id) }}?next={{ url_for('checks_page', slug=c.slug) }}">{{ x.date|mdy }}</a></td><td>{{ x.check_no or '—' }}</td><td>{{ x.payee or '—' }}</td>
+      <td class="n">{{ (-x.amount)|money }}</td><td class="small">{{ x.category }}</td><td>{{ pill(x) }}</td><td class="small">{{ gusto(x) }}</td>
+      <td class="small">{{ x.issues|join('; ') }}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="hint">Click a date to fix the payee or category. A different payee on an exact-to-the-cent match usually means the payee was typed wrong in the books (the check amount is what Gusto calculated).</p>
+</details>
+
+<details class="card-sec" open>
+  <summary><span>Gusto paper paychecks not found at the bank</span><span class="muted">{{ r.outstanding|length }} · {{ r.outstanding_total|money }}</span></summary>
+  {% if r.outstanding %}
+  <table>
+    <tr><th>Pay day</th><th>Run</th><th>Pay period</th><th>Employee</th><th class="n">Net pay</th><th class="n">Paycheck tips</th><th class="n">Days since</th></tr>
+    {% for p in r.outstanding %}
+    <tr><td>{{ p.pay_day|mdy }}</td><td class="small">{{ p.run }}</td><td class="small">{{ p.period[0]|mdy }}–{{ p.period[1]|mdy }}</td><td>{{ p.name }}</td>
+      <td class="n">{{ p.net|money }}</td><td class="n">{{ p.tips|money if p.tips else '—' }}</td><td class="n {{ 'neg' if p.age > 60 }}">{{ p.age }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="empty">Every Gusto paper paycheck has cleared the bank.</div>{% endif %}
+  {% if r.unpaid_cash_tips %}<p class="hint">Cash tips reported in Gusto with no check found for them (they may have been handed over in cash): {% for p in r.unpaid_cash_tips %}{{ p.name }} {{ p.cash_tips|money }} ({{ p.pay_day|mdy }}){{ ', ' if not loop.last }}{% endfor %}.</p>{% endif %}
+  <p class="hint">Not cashed yet, lost, voided and re-issued, or written for a different amount. Checks are matched up to 75 days after the pay day.</p>
+</details>
+
+<details class="card-sec">
+  <summary><span>By employee</span><span class="muted">{{ r.people|length }}</span></summary>
+  <table>
+    <tr><th>Employee</th><th class="n">Gusto paper checks</th><th class="n">Gusto net</th><th class="n">Cashed</th><th class="n">Not cashed</th><th class="n">Paycheck tips</th><th class="n">Cash tips</th><th class="n">Outside Gusto</th><th class="n">Before payroll</th></tr>
+    {% for p in r.people %}
+    <tr><td>{{ p.name }}</td><td class="n">{{ p.gusto_checks or '—' }}</td><td class="n">{{ p.gusto_net|money if p.gusto_net else '—' }}</td>
+      <td class="n">{{ p.cleared_net|money if p.cleared else '—' }}{% if p.diffs %} <span class="muted small">({{ p.diffs }} differ)</span>{% endif %}</td>
+      <td class="n {{ 'neg' if p.outstanding }}">{{ p.outstanding_net|money if p.outstanding else '—' }}</td>
+      <td class="n">{{ p.tips|money if p.tips else '—' }}</td><td class="n">{{ p.cash_tips|money if p.cash_tips else '—' }}</td>
+      <td class="n">{{ p.outside_total|money if p.outside else '—' }}</td><td class="n">{{ p.before|money if p.before else '—' }}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="hint">Paycheck and cash tips are for every Gusto run (direct deposit too), so they show how much of each person's pay was tips.</p>
+</details>
+
+<details class="card-sec">
+  <summary><span>All checks</span><span class="muted">{{ r.rows|length }}</span></summary>
+  <table>
+    <tr><th>Date</th><th>Check #</th><th>Payee (books)</th><th class="n">Amount</th><th>Category</th><th>Status</th><th>Gusto</th></tr>
+    {% for x in r.rows %}
+    <tr><td><a href="{{ url_for('entry_edit', slug=c.slug, eid=x.id) }}?next={{ url_for('checks_page', slug=c.slug) }}">{{ x.date|mdy }}</a></td><td>{{ x.check_no or '—' }}</td><td>{{ x.payee or '—' }}</td>
+      <td class="n">{{ (-x.amount)|money }}</td><td class="small">{{ x.category }}</td><td>{{ pill(x) }}</td><td class="small">{{ gusto(x) }}</td></tr>
+    {% endfor %}
+  </table>
+</details>
+{% if hc %}
+<details class="card-sec" id="hours">
+  <summary><span>Hours: POS time clock (Linga, Heartland…) vs Gusto</span><span class="muted">{{ hc.periods|length }} pay periods</span></summary>
+  <table>
+    <tr><th>Pay period</th><th>Employee</th><th class="n">POS clock</th><th class="n">Gusto paid</th><th class="n">Difference</th><th>Note</th></tr>
+    {% for p in hc.periods %}{% for r in p.rows %}
+    <tr><td>{% if loop.first %}<b>{{ p.start|mdy }}–{{ p.end|mdy }}</b>{% endif %}</td><td>{{ r.name }}</td>
+      <td class="n">{{ '%.2f'|format(r.linga) if not r.no_clock else '—' }}</td><td class="n">{{ '%.2f'|format(r.gusto) }}</td>
+      <td class="n {{ 'neg' if r.off }}">{{ ('%+.2f'|format(r.diff)) if not r.no_clock else '' }}</td>
+      <td class="small muted">{% if r.no_clock %}no POS clock-ins (salaried or not clocking){% elif r.flags %}{{ r.flags }} missed clock-out{{ 's' if r.flags > 1 }} ({{ '%.1f'|format(r.raw - r.linga) }} h left out){% elif r.off %}check timesheet{% endif %}</td></tr>
+    {% endfor %}
+    <tr class="muted small"><td></td><td>Period total</td><td class="n">{{ '%.2f'|format(p.linga) }}</td><td class="n">{{ '%.2f'|format(p.gusto) }}</td><td colspan="2"></td></tr>
+    {% endfor %}
+  </table>
+  <p class="hint">POS hours leave out shifts over 14 hours or still clocked in (someone forgot to clock out — {{ hc.long_shifts|length }} of them); Gusto usually has the corrected time. Differences over 2 hours are in red.{% if hc.unmatched %} Logins not matched to an employee: {% for k, v in hc.unmatched|dictsort %}{{ k }} {{ v }} h{{ ', ' if not loop.last }}{% endfor %} (set them under Name matching on Card deposits &amp; tips).{% endif %}</p>
+</details>
+{% endif %}
+{% endblock %}

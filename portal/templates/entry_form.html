@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} · {{ 'New check or payment' if kind == 'check' else 'New bill' }}{% endblock %}
+{% block heading %}{{ c.name }}{% endblock %}
+{% block sub %}<p>{{ 'Check or payment you wrote' if kind == 'check' else 'Bill to pay' }}</p>{% endblock %}
+{% block body %}
+<form method="post" class="form card wide">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% if kind == 'check' %}
+  <div class="row2">
+    <label>Date written <input type="date" name="date" value="{{ f.get('date', today) }}" required></label>
+    <label>Check # <span class="muted">(blank for card, ACH or cash)</span><input name="check_no" inputmode="numeric" maxlength="12" value="{{ f.get('check_no', '') }}" autofocus></label>
+  </div>
+  <label>Paid to <input name="payee" list="payees" maxlength="100" required value="{{ f.get('payee', '') }}" autocomplete="off"></label>
+  {% else %}
+  <label>Vendor <input name="payee" list="payees" maxlength="100" required value="{{ f.get('payee', '') }}" autocomplete="off" autofocus></label>
+  <div class="row2">
+    <label>Due date <input type="date" name="due_date" value="{{ f.get('due_date', '') }}" required></label>
+    <label>Invoice # <input name="invoice_no" maxlength="40" value="{{ f.get('invoice_no', '') }}"></label>
+  </div>
+  {% endif %}
+  <div class="row2">
+    <label>Amount <input name="amount" inputmode="decimal" placeholder="0.00" required value="{{ f.get('amount', '') }}"></label>
+    <label>Category <select name="category"><option value="">Choose later</option>{% for x in cats %}<option {{ 'selected' if x == f.get('category') }}>{{ x }}</option>{% endfor %}</select></label>
+  </div>
+  <label>{{ 'Memo' if kind == 'check' else 'Notes' }} <input name="{{ 'memo' if kind == 'check' else 'notes' }}" maxlength="200" value="{{ f.get('memo', f.get('notes', '')) }}"></label>
+  <datalist id="payees">{% for p in payees %}<option value="{{ p }}">{% endfor %}</datalist>
+  <div class="actions">
+    <button type="submit" class="primary-sm">Save</button>
+    <button type="submit" name="again" value="1">Save and add another</button>
+    <a class="btn" href="{{ url_for('client_page', slug=c.slug) }}">Cancel</a>
+  </div>
+  <p class="hint">{% if kind == 'check' %}It shows under "Not cleared yet" until the bank shows it, then it's matched by check number or amount automatically.{% else %}It shows in Upcoming bills. Use Pay there when it's paid; autopay bills are marked paid when the bank shows the payment.{% endif %}</p>
+</form>
+{% endblock %}

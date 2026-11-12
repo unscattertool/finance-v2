@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block body %}
+<section class="list"><h2>Your clients</h2>
+{% for c in clients %}<a href="{{ url_for('client_page', slug=c.slug) }}">{{ c.name }}</a>{% else %}<div class="empty">No clients assigned to your account yet.</div>{% endfor %}
+</section>
+{% endblock %}

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} · recurring payments check{% endblock %}
+{% block heading %}{{ c.name }} · recurring payments check{% endblock %}
+{% block sub %}<p>Payments in the register that repeat on a schedule, compared with the recurring payments list · last {{ r.months }} months, bank data through {{ r.through|mdy }}</p>{% endblock %}
+{% block body %}
+{% set FREQS = ['weekly','biweekly','monthly','quarterly','yearly'] %}
+<p><a href="{{ url_for('client_page', slug=c.slug) }}">← Back</a> · <a href="{{ url_for('report', slug=c.slug, kind='vendors') }}">Spending by vendor</a></p>
+{% set attn = r.tracked|selectattr('status', 'ne', 'ok')|list %}
+<div class="tiles">
+  <div class="tile"><div class="k">Tracked</div><div class="v">{{ r.tracked|length }}</div><div class="s">recurring payments set up</div></div>
+  <div class="tile"><div class="k">Need a look</div><div class="v {{ 'neg' if attn }}">{{ attn|length }}</div><div class="s">late, not seen, or changed</div></div>
+  <div class="tile"><div class="k">New candidates</div><div class="v">{{ r.new|length }}</div><div class="s">repeat on a schedule, not tracked</div></div>
+</div>
+
+{% macro pill(st) %}{% set lab = {'missing': ('late', 'Not seen lately'), 'late': ('late', 'Late'), 'changed': ('soon', 'Changed'), 'ok': ('ok', 'OK')}[st] %}<span class="pill {{ lab[0] }}">{{ lab[1] }}</span>{% endmacro %}
+
+<details class="card-sec" open>
+  <summary><span>New candidates</span><span class="muted">{{ r.new|length }}</span></summary>
+  {% if r.new %}
+  <div class="scroll"><table>
+    <tr><th>Payee</th><th>How often</th><th class="n">Usual</th><th class="hide-sm">Last paid</th><th class="n">Per month</th></tr>
+    {% for x in r.new %}
+    <tr><td>{{ x.payee }}<br><span class="muted small">{{ x.category }}</span>
+      {% if editor %}<details><summary class="btn">Add…</summary>
+        <form method="post" class="mini">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="add"><input type="hidden" name="payee" value="{{ x.payee }}">
+          <label>Name <input name="name" value="{{ x.payee }}" maxlength="120" required></label>
+          <label>Category <select name="category"><option value="">Any</option>{% for k in cats %}<option{{ ' selected' if k == x.category }}>{{ k }}</option>{% endfor %}</select></label>
+          <label>How often <select name="frequency">{% for k in FREQS %}<option{{ ' selected' if k == x.frequency }}>{{ k }}</option>{% endfor %}</select></label>
+          <label>Usual amount <input name="typical_amount" value="{{ '' if x.varies else '%.2f'|format(x.typical) }}" size="8" inputmode="decimal" placeholder="last payment"></label>
+          <label><input type="checkbox" name="autopay" value="1"> Autopay</label>
+          <button type="submit" class="primary-sm">Add to recurring</button>
+        </form>
+        <form method="post" class="mini">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="ignore"><input type="hidden" name="payee" value="{{ x.payee }}">
+          <button type="submit">Not recurring — don't suggest</button>
+        </form></details>{% endif %}</td>
+      <td>{{ x.frequency }} <span class="muted small">({{ x.count }} payments)</span></td>
+      <td class="n">{{ x.typical|money }}{% if x.varies %}<br><span class="muted small">varies {{ x.low|money }} – {{ x.high|money }}</span>{% endif %}</td><td class="hide-sm">{{ x.last|mdy }} · {{ x.last_amount|money }}</td>
+      <td class="n">{{ x.per_month|money }}</td></tr>
+    {% endfor %}
+  </table></div>
+  <p class="hint">Leave "Usual amount" blank when it varies; upcoming bills then use the last payment.</p>
+  {% else %}<div class="empty">No new repeating payments found.</div>{% endif %}
+</details>
+
+<details class="card-sec" open>
+  <summary><span>Recurring payments set up</span><span class="muted">{{ attn|length }} need a look</span></summary>
+  <div class="scroll"><table>
+    <tr><th>Name</th><th>Set up as</th><th>Seen in the bank</th><th>What to check</th></tr>
+    {% for t in r.tracked %}{% set k = t.check %}
+    <tr><td>{{ t.name }} {{ pill(t.status) }}<br><span class="muted small">{{ t.payee }}{% if t.category %} · {{ t.category }}{% endif %}</span></td>
+      <td class="small">{{ t.frequency or 'monthly' }} · {{ t.typical_amount|money if t.typical_amount else 'last payment' }}{% if t.autopay %} · autopay{% endif %}</td>
+      <td class="small">{% if k.count %}{{ k.frequency or 'irregular' }} · usually {{ k.typical|money }}{% if k.varies %} (varies){% endif %}<br>last {{ k.last|mdy }} · {{ k.last_amount|money }}{% else %}—{% endif %}</td>
+      <td class="small">{{ t.notes|join('; ') or '—' }}
+      {% if editor %}{% if t.status != 'ok' %}<details><summary class="btn">Fix…</summary>
+        <form method="post" action="{{ url_for('recurring_action', slug=c.slug, rid=t.id) }}" class="mini">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="save"><input type="hidden" name="next" value="check">
+          <label>Name <input name="name" value="{{ t.name }}" maxlength="120" required></label>
+          <label>Payee (as in the register) <input name="payee" value="{{ t.payee or '' }}" maxlength="120"></label>
+          <label>Category <select name="category"><option value="">Any</option>{% for x in cats %}<option{{ ' selected' if x == t.category }}>{{ x }}</option>{% endfor %}</select></label>
+          <label>How often <select name="frequency">{% for x in FREQS %}<option{{ ' selected' if x == (t.suggest_frequency or 'monthly')|replace('annual','yearly') }}>{{ x }}</option>{% endfor %}</select></label>
+          <label>Usual amount <input name="typical_amount" value="{{ '%.2f'|format(t.suggest_amount) if t.suggest_amount else '' }}" size="8" inputmode="decimal" placeholder="last payment"></label>
+          <label><input type="checkbox" name="autopay" value="1"{{ ' checked' if t.autopay }}> Autopay</label>
+          <button type="submit" class="primary-sm">Save</button>
+        </form>
+        <form method="post" action="{{ url_for('recurring_action', slug=c.slug, rid=t.id) }}" class="mini" data-confirm="Stop tracking this recurring payment?">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="delete"><input type="hidden" name="next" value="check">
+          <button type="submit">Remove — it stopped</button>
+        </form></details>{% endif %}{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  <p class="hint">Late or not seen: the payment may have been made under another name (fix the payee so it matches), paid another way, or cancelled (remove it).
+    The suggested fixes in each form come from the last few payments.</p>
+</details>
+
+{% if r.ignored %}
+<details class="card-sec">
+  <summary><span>Marked not recurring</span><span class="muted">{{ r.ignored|length }}</span></summary>
+  <table>{% for p in r.ignored %}<tr><td>{{ p }}</td>{% if editor %}<td><form method="post" class="mini"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="action" value="unignore"><input type="hidden" name="payee" value="{{ p }}"><button type="submit">Suggest again</button></form></td>{% endif %}</tr>{% endfor %}</table>
+</details>
+{% endif %}
+{% endblock %}

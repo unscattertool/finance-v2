@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} · cash{% endblock %}
+{% block heading %}{{ c.name }} · cash{% endblock %}
+{% block sub %}<p>Till, deposits and what each shift turned in</p>{% endblock %}
+{% block body %}
+{% macro covers(o) %}{% if o %}{% for c in o.covers %}<a href="#day-{{ c.date }}">{{ c.date|mdy }}</a> {{ c.amount|money }}{{ '*' if c.partial }}{{ ', ' if not loop.last }}{% endfor %}{% if o.excess > 0.005 %}{{ ' · ' if o.covers }}<span class="neg-soft">{{ o.excess|money }} more than recorded cash</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}{% endmacro %}
+<p><a href="{{ url_for('client_page', slug=c.slug) }}">← Back</a></p>
+<div class="tiles">
+  <div class="tile"><div class="k">Should be in the till now</div><div class="v">{{ t.expected_now|money if t.expected_now is not none else '—' }}</div>
+    <div class="s">{% if t.last_count %}Counted {{ t.last_count.amount|money }} on {{ t.last_count.date|mdy }}{% if t.out_since %} − taken out {{ t.out_since|money }}{% endif %}{% if t.in_since %} + cash sales {{ t.in_since|money }}{% endif %}{% if t.paid_since %} − receipts {{ t.paid_since|money }}{% endif %}{% else %}Record a till count or a starting till to start tracking{% endif %}</div></div>
+  <div class="tile"><div class="k">Unaccounted cash · last count</div><div class="v {{ 'neg' if t.recent_total < -0.005 }}">{{ t.recent_total|money if t.recent else '—' }}</div>
+    <div class="s">{% if t.recent %}{% for f in t.recent %}{{ f.date|mdy }} {{ f.amount|money }}{{ ', ' if not loop.last }}{% endfor %}{% if t.prev_count %} since the {{ t.prev_count|mdy }} count{% endif %} — <a href="#unaccounted">see below</a>{% else %}The last count matched what the till should hold{% endif %}</div></div>
+  <div class="tile"><div class="k">Bank deposits to record</div><div class="v">{{ t.unrecorded|length }}</div><div class="s">{% if t.unmatched %}{{ t.unmatched }} recorded deposit{{ '' if t.unmatched == 1 else 's' }} not at the bank yet{% else %}Recorded deposits all match the bank{% endif %}</div></div>
+</div>
+
+{% if editor %}
+<div class="row2 cash-forms">
+  <form method="post" class="form card wide">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="count">
+    <strong>Count the till at close</strong>
+    <div class="row2"><label>Date (end of day) <input type="date" name="date" value="{{ today }}" required></label>
+      <label>Cash counted <input name="amount" inputmode="decimal" placeholder="0.00" required></label></div>
+    <label>Note <input name="note" maxlength="200" placeholder="e.g. after Sunday brunch"></label>
+    <div class="actions"><button type="submit" class="primary-sm">Save count</button></div>
+  </form>
+  <form method="post" class="form card wide">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="start">
+    <strong>Starting till</strong>
+    <div class="row2"><label>Date (start of day) <input type="date" name="date" value="{{ today }}" required></label>
+      <label>Cash in the till at opening <input name="amount" inputmode="decimal" placeholder="{{ '%.2f'|format(t.expected_now) if t.expected_now is not none else '0.00' }}" required></label></div>
+    <label>Note <input name="note" maxlength="200" placeholder="optional"></label>
+    <p class="hint">Not entered: the drawer report's starting cash, else {{ t.expected_now|money if t.expected_now is not none else 'the last close minus cash taken out since' }}.</p>
+    <div class="actions"><button type="submit" class="primary-sm">Save starting till</button></div>
+  </form>
+  <form method="post" class="form card wide">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="deposit">
+    <strong>Record a cash deposit</strong>
+    <div class="row2"><label>Date taken to bank <input type="date" name="date" value="{{ today }}" required></label>
+      <label>Amount <input name="amount" inputmode="decimal" placeholder="0.00" required></label></div>
+    <label>Note <input name="note" maxlength="200" placeholder="who took it, bag #"></label>
+    <div class="actions"><button type="submit" class="primary-sm">Save deposit</button></div>
+  </form>
+  <form method="post" class="form card wide">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="payout">
+    <strong>Cash taken out (not to the bank)</strong>
+    <div class="row2"><label>Date taken <input type="date" name="date" value="{{ today }}" required></label>
+      <label>Amount <input name="amount" inputmode="decimal" placeholder="0.00" required></label></div>
+    <div class="row2"><label>To <input name="party" maxlength="80" placeholder="e.g. Mandy"></label>
+      <label>What for <select name="reason"><option>Owner draw</option><option>Paid out</option><option>Supplies</option><option>Tips paid in cash</option></select></label></div>
+    <p class="hint">On a day you count the till, cash taken out comes off after the count (count $795, take out $700 → $95 stays for the next day).</p>
+    <div class="actions"><button type="submit" class="primary-sm">Save</button></div>
+  </form>
+</div>
+{% endif %}
+
+<details class="card-sec" open id="unaccounted">
+  <summary><span>Since the last count — where the cash should be</span><span class="muted">{% if t.last_count %}counted {{ t.last_count.amount|money }} on {{ t.last_count.date|mdy }}{% endif %}</span></summary>
+  {% if t.last_count %}
+  <table>
+    <tr><th>Date</th><th>What</th><th class="n">Amount</th><th class="n">Should be in the till</th></tr>
+    {% set lr = t.last_row %}
+    <tr><td>{{ t.last_count.date|mdy }}</td><td>Counted at close</td><td class="n">{{ t.last_count.amount|money }}</td><td class="n">{{ t.last_count.amount|money }}</td></tr>
+    {% if lr %}{% set ns = namespace(v=t.last_count.amount) %}{% for o in lr.outs %}{% set ns.v = ns.v - o.amount %}<tr><td>{{ lr.date|mdy }}</td><td>{{ o.label }} (after the count)</td><td class="n neg">−{{ o.amount|money }}</td><td class="n">{{ ns.v|money }}</td></tr>{% endfor %}{% endif %}
+    {% for r in t.since|reverse %}
+      {% if r.start_src in ('entered', 'drawer report') %}<tr><td>{{ r.date|mdy }}</td><td>Starting till ({{ r.start_src }}){% if r.start_var %} · <span class="{{ 'neg-soft' if r.start_var < 0 else 'pos-soft' }}">{{ r.start_var|money }} vs expected</span>{% endif %}</td><td class="n"></td><td class="n">{{ r.start|money }}</td></tr>{% endif %}
+      {% if r.sales %}<tr><td>{{ r.date|mdy }}</td><td>Cash sales (POS)</td><td class="n">+{{ r.sales|money }}</td><td class="n">{{ (r.start + r.sales)|money }}</td></tr>{% endif %}
+      {% if r.receipts %}<tr><td>{{ r.date|mdy }}</td><td>Receipts paid out (Shifts closeouts)</td><td class="n neg">−{{ r.receipts|money }}</td><td class="n">{{ r.close|money }}</td></tr>{% endif %}
+      {% for o in r.outs %}<tr><td>{{ r.date|mdy }}</td><td>{{ o.label }}</td><td class="n neg">−{{ o.amount|money }}</td><td class="n">{{ '' }}</td></tr>{% endfor %}
+    {% endfor %}
+    <tr><td></td><td><b>Should be in the till now</b></td><td></td><td class="n"><b>{{ t.expected_now|money }}</b></td></tr>
+  </table>
+  <p class="hint">Anything not in the till at the next count either went out without being recorded (record it under “Cash taken out”) or is missing.</p>
+  {% else %}<div class="empty">No till count yet.</div>{% endif %}
+  {% if t.unaccounted %}
+  <table>
+    <tr><th>Date</th><th>Unaccounted</th><th class="n">Expected</th><th class="n">Actual</th><th class="n">Over / short</th></tr>
+    {% for f in t.unaccounted %}<tr><td>{{ f.date|mdy }}</td><td>{{ f.text }}</td><td class="n">{{ f.expected|money }}</td><td class="n">{{ f.actual|money }}</td>
+      <td class="n {{ 'neg-soft' if f.amount < 0 else 'pos-soft' }}">{{ f.amount|money }}</td></tr>{% endfor %}
+    <tr><td></td><td><b>Total · last 60 days</b> <span class="muted small">(before Heartland drawer reports and recorded pulls, older gaps mostly mean cash taken out that wasn't recorded)</span></td><td></td><td></td><td class="n"><b>{{ t.unaccounted_total|money }}</b></td></tr>
+  </table>
+  <p class="hint">Short = less cash than there should be: record what was taken out (owner draw, supplies, tips paid in cash) or enter the real starting till; what's left is missing.</p>
+  {% endif %}
+</details>
+
+<details class="card-sec" open id="till-days">
+  <summary><span>Till by day</span><span class="muted">start + cash sales − receipts = close; taken out after the count</span></summary>
+  {% if t.rows %}
+  <div class="scroll"><table>
+    <tr><th>Date</th><th class="n">Starting till</th><th class="n">+ Cash sales</th><th class="n">− Receipts</th><th class="n">Should hold at close</th><th class="n">Counted</th><th class="n">Over / short</th><th class="n">− Taken out</th><th class="n">Left for next day</th>{% if editor %}<th></th>{% endif %}</tr>
+    {% for r in t.rows %}
+    <tr><td>{{ r.date|mdy }}</td>
+      <td class="n">{{ r.start|money if r.start is not none else '—' }}{% if r.start_src %} <span class="muted small">{{ 'est.' if r.start_src == 'estimated' else ('drawer' if r.start_src == 'drawer report' else 'entered') }}</span>{% endif %}</td>
+      <td class="n">{{ r.sales|money if r.sales else '' }}</td><td class="n">{{ r.receipts|money if r.receipts else '' }}</td>
+      <td class="n">{{ r.close|money if r.close is not none else '—' }}</td><td class="n">{{ r.counted|money if r.counted is not none else '' }}</td>
+      <td class="n {{ 'neg-soft' if r.variance and r.variance < -0.005 else ('pos-soft' if r.variance and r.variance > 0.005 else '') }}">{{ r.variance|money if r.variance else '' }}</td>
+      <td class="n">{% if r.out_total %}<span title="{% for o in r.outs %}{{ o.label }} {{ o.amount|money }}{{ '; ' if not loop.last }}{% endfor %}">{{ r.out_total|money }}</span>{% endif %}</td>
+      <td class="n"><b>{{ r.left|money if r.left is not none else '—' }}</b></td>
+      {% if editor %}<td>{% if r.start_id %}<form method="post" class="mini" style="display:inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="delete-start"><input type="hidden" name="id" value="{{ r.start_id }}"><button type="submit" class="link">remove start</button></form>{% endif %}</td>{% endif %}</tr>
+    {% endfor %}
+  </table></div>
+  <p class="hint">Starting till: entered here, else the Heartland cash drawer report's starting cash, else estimated as the last close minus cash taken out since. Cash sales come from the POS (Heartland Daily Summary / Transactions / Cash Summary). Receipts = cash paid out of the drawer on Shifts closeouts.</p>
+  {% else %}<div class="empty">Record a till count or a starting till to start tracking.</div>{% endif %}
+</details>
+
+{% if t.unrecorded %}
+<details class="card-sec" open>
+  <summary><span>Cash deposits at the bank not recorded here</span><span class="muted">{{ t.unrecorded|length }}</span></summary>
+  <table>
+    <tr><th>Bank date</th><th>Description</th><th class="n">Amount</th><th>Cash from (if from the till)</th>{% if editor %}<th></th>{% endif %}</tr>
+    {% for e in t.unrecorded %}
+    <tr id="dep-{{ e.id }}"><td>{{ e.date|mdy }}</td><td>{{ e.description }} <span class="muted small">{{ e.category }}</span></td><td class="n">{{ e.amount|money }}</td>
+      <td class="small">{{ covers(da.by_entry.get(e.id)) if da else '—' }}</td>
+      {% if editor %}<td><form method="post" class="mini"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="action" value="deposit"><input type="hidden" name="date" value="{{ e.date }}"><input type="hidden" name="amount" value="{{ e.amount }}"><input type="hidden" name="entry_id" value="{{ e.id }}">
+        <input type="hidden" name="note" value="From bank deposit"><button type="submit">It's from the till</button></form></td>{% endif %}</tr>
+    {% endfor %}
+  </table>
+  <p class="hint">Card settlements aren't listed here. Mark a deposit as from the till so it comes off the expected till amount.</p>
+</details>
+{% endif %}
+
+<details class="card-sec" open>
+  <summary><span>Till counts</span><span class="muted">{{ t.history|length }}</span></summary>
+  {% if t.history %}
+  <table>
+    <tr><th>Date</th><th class="n">Counted</th><th class="n">Expected</th><th class="n">Over / short</th><th class="hide-sm">Note</th>{% if editor %}<th></th>{% endif %}</tr>
+    {% for h in t.history %}
+    <tr><td>{{ h.date|mdy }}</td><td class="n">{{ h.counted|money }}</td><td class="n">{{ h.expected|money if h.expected is not none else '—' }}</td>
+      <td class="n {{ 'neg-soft' if h.variance and h.variance < -0.005 else ('pos-soft' if h.variance and h.variance > 0.005 else '') }}">{{ h.variance|money if h.variance is not none else 'starting count' }}</td>
+      <td class="hide-sm muted">{{ h.note or '' }}</td>
+      {% if editor %}<td><form method="post" class="mini"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="delete-count"><input type="hidden" name="id" value="{{ h.id }}"><button type="submit">Remove</button></form></td>{% endif %}</tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="empty">No counts yet. The first count sets the starting point; later counts are checked against it.</div>{% endif %}
+</details>
+
+<details class="card-sec">
+  <summary><span>Cash deposits</span><span class="muted">{{ t.deposits|length }}</span></summary>
+  {% if t.deposits %}
+  <table>
+    <tr><th>Date</th><th class="n">Amount</th><th class="n hide-sm">Sales tax — state</th><th class="n hide-sm">Alcohol tax</th><th class="n">Tax payable</th><th class="n hide-sm" title="Hourly wages for the hours worked on the business days this deposit covers (its share of each day's sales) + employer payroll tax">Labor</th><th class="n hide-sm" title="Net sales × Food COGS purchases ÷ net sales over the 2 weeks before the deposit">Food cost</th><th class="n hide-sm" title="Net sales × Beverage COGS purchases ÷ net sales over the 2 weeks before the deposit">Bev. cost</th><th class="n" title="Deposit − card tips − sales tax − labor − food and beverage cost">Left</th><th>Bank</th><th>Cash from</th><th class="hide-sm">Note</th>{% if editor %}<th></th>{% endif %}</tr>
+    {% for d in t.deposits %}
+    <tr id="rec-{{ d.id }}"><td>{{ d.date|mdy }}</td><td class="n">{{ d.amount|money }}</td>
+      {% set x = stx.get(d.entry_id) if (stx and d.entry_id) else None %}<td class="n hide-sm">{{ x.state|money if x else '—' }}</td><td class="n hide-sm">{{ x.alc|money if x else '—' }}</td>
+      <td class="n">{{ x.total|money if x else '—' }}{% if x and x.estimated %} <span class="muted small">est.</span>{% endif %}</td>
+      {% set b = bd.get(d.entry_id) if bd else None %}<td class="n hide-sm">{% if b %}<span title="Wages {{ b.wages|money }} + payroll tax {{ b.payroll_tax|money }}{{ ' · no hours found for ' ~ (b.days - b.labor_days) ~ ' day(s)' if b.labor_days < b.days }}">{{ b.labor|money }}</span>{% else %}—{% endif %}</td>
+      <td class="n hide-sm">{% if b and b.food is not none %}<span title="Food COGS {{ b.cogs_basis.food|money }} ÷ net sales {{ b.cogs_basis.sales|money }} (2 weeks before)">{{ b.food|money }}</span>{% else %}—{% endif %}</td>
+      <td class="n hide-sm">{% if b and b.bev is not none %}<span title="Beverage COGS {{ b.cogs_basis.bev|money }} ÷ net sales {{ b.cogs_basis.sales|money }} (2 weeks before)">{{ b.bev|money }}</span>{% else %}—{% endif %}</td>
+      <td class="n">{% if b %}<b class="{{ 'neg' if b.left < 0 }}">{{ b.left|money }}</b>{% else %}—{% endif %}</td>
+      <td>{% if d.entry_id %}<span class="pill ok">At bank {{ d.bank_date|mdy }}</span>{% else %}<span class="pill soon">Not at bank yet</span>{% endif %}</td>
+      <td class="small">{% if da %}{% set o = da.by_entry.get(d.entry_id) if d.entry_id else (da.outs|selectattr('key', 'equalto', 'rec-' ~ d.id)|first) %}{{ covers(o) }}{% else %}—{% endif %}</td>
+      <td class="hide-sm muted">{{ d.note or '' }}</td>
+      {% if editor %}<td><form method="post" class="mini"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="delete-deposit"><input type="hidden" name="id" value="{{ d.id }}"><button type="submit">Remove</button></form></td>{% endif %}</tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="empty">No cash deposits recorded yet.</div>{% endif %}
+</details>
+
+<details class="card-sec">
+  <summary><span>Cash by day (from Shifts)</span><span class="muted">last 60 days</span></summary>
+  {% if t.daily %}
+  <div class="scroll"><table>
+    <tr><th>Date</th><th class="n">Expected</th><th class="n">Turned in</th><th class="n">Paid outs</th><th class="n">Short</th></tr>
+    {% for d in t.daily %}
+    <tr><td>{{ d.date|mdy }}</td><td class="n">{{ d.cash_expected|money }}</td><td class="n">{{ d.turned_in|money }}</td><td class="n">{{ d.paid_out|money }}</td>
+      <td class="n {{ 'neg-soft' if d.short > 0.005 }}">{{ d.short|money }}</td></tr>
+    {% endfor %}
+  </table></div>
+  <p class="hint">Expected = cash the POS says was collected. Short = expected − turned in − paid outs (still with staff or missing).</p>
+  {% else %}<div class="empty">No cash recorded in Shifts in the last 60 days.</div>{% endif %}
+</details>
+{% if lc %}
+<details class="card-sec" open id="linga-cash">
+  <summary><span>Cash &amp; checks taken in vs deposited (Linga archive)</span><span class="muted">{{ lc.not_deposited|money }} not deposited</span></summary>
+  <table>
+    <tr><th>Month</th><th class="n">Cash sales</th><th class="n">Customer checks</th><th class="n">Taken in</th><th class="n">Deposited (Sales - Cash)</th><th class="n">Paid out of drawer*</th><th class="n">Not deposited (running)</th></tr>
+    {% for m in lc.months %}
+    <tr><td>{{ m.label }}</td><td class="n">{{ m.cash|money }}</td><td class="n">{{ m.checks|money if m.checks else '—' }}</td><td class="n">{{ m.took|money }}</td>
+      <td class="n">{{ m.deposits|money if m.deposits else '—' }}{% if m.n_dep %} <span class="muted small">({{ m.n_dep }})</span>{% endif %}</td>
+      <td class="n">{{ m.paid_out|money if m.paid_out else '—' }}</td><td class="n {{ 'neg' if m.running > 0.005 }}">{{ m.running|money }}</td></tr>
+    {% endfor %}
+    <tr><td><b>Total</b></td><td class="n"><b>{{ lc.cash|money }}</b></td><td class="n"><b>{{ lc.checks_total|money }}</b></td><td class="n"><b>{{ (lc.cash + lc.checks_total)|money }}</b></td>
+      <td class="n"><b>{{ lc.deposited|money }}</b></td><td class="n"><b>{{ lc.paid_out|money }}</b></td><td class="n"><b>{{ lc.not_deposited|money }}</b></td></tr>
+  </table>
+  <p class="hint">Cash sales and customer checks come from Linga's Transaction Report (every payment, by tender). Deposited = bank deposits categorized Sales - Cash. A negative running balance means more was deposited than Linga took in (cash from elsewhere, e.g. owner money, categorized as cash sales). *Cash spent from the drawer (grocery runs, change). Linga only recorded paid in/outs from {{ lc.paid[0].date|mdy if lc.paid else '—' }}; cash pulled from the drawer at end of day ({{ lc.paid_to_safe|money }}) and cash taken to the bank ({{ lc.paid_to_bank|money }}) are not counted as paid out — they're still the business's cash until deposited.</p>
+  {% if lc.checks %}<p class="hint">Customer checks: {% for x in lc.checks %}{{ x.date|mdy }} {{ x.amount|money }} (check {{ x.check_no }}, {{ x.employee }}){{ ', ' if not loop.last }}{% endfor %}.</p>{% endif %}
+  {% if lc.paid %}
+  <table>
+    <tr><th>Date</th><th>By</th><th>To / from</th><th>Reason</th><th class="n">Amount</th></tr>
+    {% for r in lc.paid %}<tr><td>{{ r.date|mdy }}</td><td>{{ r.by_name }}</td><td>{{ r.party }}</td><td>{{ r.reason }}{% if r.kind == 'bank' %} <span class="pill ok">to bank</span>{% elif r.kind == 'safe' %} <span class="pill">pulled from drawer</span>{% else %} <span class="pill soon">spent</span>{% endif %}</td><td class="n">{{ r.amount|money }}</td></tr>{% endfor %}
+  </table>
+  {% endif %}
+</details>
+{% endif %}
+{% if da %}
+<details class="card-sec" open id="cash-days">
+  <summary><span>Cash by day → which deposit it went in</span><span class="muted">{{ da.on_hand|money }} never deposited</span></summary>
+  <table>
+    <tr><th>Business day</th><th class="n">Cash</th><th class="n">Customer checks</th><th>Went into</th><th class="n">Not deposited</th></tr>
+    {% for d in da.days %}
+    <tr id="day-{{ d.date }}"><td>{{ d.date|mdy }}{% if d.source != 'Linga' %} <span class="muted small">({{ d.source }})</span>{% endif %}</td>
+      <td class="n">{{ d.cash|money if d.cash else '—' }}</td><td class="n">{{ d.checks|money if d.checks else '—' }}</td>
+      <td class="small">{% for w in d.went %}<a href="#{{ w.key }}">{{ w.label }}</a> {{ w.amount|money }}{{ ', ' if not loop.last }}{% endfor %}{% if not d.went %}<span class="muted">—</span>{% endif %}</td>
+      <td class="n {{ 'neg-soft' if d.left > 0.005 }}">{{ d.left|money if d.left > 0.005 else '' }}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="hint">Each bank deposit from the till (marked with “It's from the till”, or categorized Sales - Cash) carries the most recent cash on hand before it — up to the day it was pulled for the bank when Linga's paid-out log shows that — going back at most 3 weeks; cash spent from the drawer is taken out first. * = part of that day's cash. “More than recorded cash” means the deposit was bigger than the cash Linga/Shifts show, e.g. owner money or a day that wasn't closed out.</p>
+</details>
+
+<details class="card-sec" open id="cash-outs">
+  <summary><span>Cash deposits and paid-outs → which days' cash</span><span class="muted">{{ da.outs|length }}{% if da.excess > 0.005 %} · {{ da.excess|money }} more than recorded cash{% endif %}</span></summary>
+  <table>
+    <tr><th>Date</th><th>What</th><th class="n">Amount</th><th>Cash from (business days)</th></tr>
+    {% for o in da.outs %}<tr id="{{ o.key }}"><td>{{ o.date|mdy }}</td><td>{{ o.label }}{% if o.kind == 'deposit' and o.recorded %} <span class="pill ok">from the till</span>{% endif %}</td>
+      <td class="n">{{ o.amount|money }}</td><td class="small">{{ covers(o) }}
+        {% if o.stretched %}<span class="muted"> · looks back {{ o.lookback }} days</span>{% endif %}
+        {% if editor and o.payout_id %}<form method="post" class="mini" style="display:inline" data-confirm="Remove this?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="delete-payout"><input type="hidden" name="id" value="{{ o.payout_id }}"><button type="submit" class="link">remove</button></form>{% endif %}
+        {% if editor and o.entry_id and (o.stretched or o.excess > 0.005) %}<form method="post" class="mini" style="display:inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="entry_id" value="{{ o.entry_id }}"><input type="hidden" name="action" value="{{ 'unstretch' if o.stretched else 'stretch' }}"><button type="submit" class="link">{{ 'usual 3 weeks' if o.stretched else 'look further back' }}</button></form>{% endif %}</td></tr>{% endfor %}
+  </table>
+</details>
+{% endif %}
+{% endblock %}
