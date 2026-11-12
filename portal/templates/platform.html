@@ -12,6 +12,8 @@
 {% block body %}
 {% if not s %}
   <div class="warn">Nothing has been published for {{ c.name }} yet. Unscatter will publish your first summary soon.</div>
+  {% if admin and not bank %}<nav class="tabs no-print"><a href="{{ url_for('accounts_page', slug=c.slug) }}">Chart of accounts</a>
+    <a href="{{ url_for('client_settings', slug=c.slug) }}">Client settings</a></nav>{% endif %}
 {% endif %}
 {% if s or bank %}
 {% set s = s or {} %}
