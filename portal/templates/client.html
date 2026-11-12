@@ -30,6 +30,7 @@
       <a href="{{ url_for('checks_page', slug=c.slug) }}">Checks vs payroll</a>
       <a href="{{ url_for('recurring_check', slug=c.slug) }}">Recurring payments check</a>
       <a href="{{ url_for('receipts_page', slug=c.slug) }}">Receipts</a>
+      <a href="{{ url_for('accounts_page', slug=c.slug) }}">Chart of accounts</a>
       {% if is_admin %}<a href="{{ url_for('visitors') }}">Visitors &amp; page views</a>{% endif %}
     </div></details>{% endif %}
     {% endif %}

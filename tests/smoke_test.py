@@ -67,7 +67,7 @@ def main():
         c.post("/login", data={"email": "admin@example.com", "password": "correct horse battery", "csrf_token": tok})
         bad = []
         for u in ["/", "/c/crs/", "/c/crs/p/sales", "/c/crs/p/sales-tax", "/c/crs/p/receivables", "/c/crs/p/cleanup", "/c/crs/settings",
-                  "/c/wwk/", "/c/wwk/reports/pl", "/c/wwk/reports/sales-tax", "/c/wwk/settings"]:
+                  "/c/wwk/", "/c/wwk/reports/pl", "/c/wwk/reports/sales-tax", "/c/wwk/settings", "/c/wwk/accounts", "/c/crs/accounts", "/c/crs/accounts?show=chart", "/c/crs/accounts?show=maps"]:
             code = c.get(u).status_code
             print(code, u)
             if code >= 400:

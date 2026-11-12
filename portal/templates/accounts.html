@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Chart of accounts · {{ c.name }}{% endblock %}
+{% block heading %}{{ c.name }} · Chart of accounts{% endblock %}
+{% block sub %}<p>The clean chart this client's books use, and how each old account (Zoho, Finance categories, bank feeds) maps to it.</p>{% endblock %}
+{% block body %}
+<nav class="tabs no-print">
+  <a href="{{ url_for('client_page', slug=c.slug) }}">← Dashboard</a>
+  <a href="{{ url_for('accounts_page', slug=c.slug, show='issues') }}" class="{{ 'on' if show == 'issues' }}">Needs a decision</a>
+  <a href="{{ url_for('accounts_page', slug=c.slug, show='chart') }}" class="{{ 'on' if show == 'chart' }}">Chart</a>
+  <a href="{{ url_for('accounts_page', slug=c.slug, show='maps') }}" class="{{ 'on' if show == 'maps' }}">Old → new accounts</a>
+</nav>
+<datalist id="acct-list">{% for a in chart %}<option value="{{ a.full }}">{{ a.label }}{{ '' if a.active else ' · inactive' }}</option>{% endfor %}</datalist>
+
+<div class="tiles">
+  <div class="tile"><div class="k">Clean accounts</div><div class="v">{{ summ.accounts }}</div><div class="s">{{ summ.active }} active</div></div>
+  <div class="tile"><div class="k">Old accounts mapped</div><div class="v">{{ summ.sources - summ.unmapped }} / {{ summ.sources }}</div>
+    <div class="s">{% for k, v in summ.by_source.items() %}{{ {'zoho': 'Zoho', 'category': 'Finance categories', 'bank': 'bank feeds'}.get(k, k) }} {{ v }}{{ ' · ' if not loop.last }}{% endfor %}</div></div>
+  <div class="tile"><div class="k">Confirmed by you</div><div class="v">{{ summ.confirmed }}</div><div class="s">the rest are suggestions</div></div>
+  <div class="tile"><div class="k">Needs a decision</div><div class="v">{{ iss.type_changes|length + iss.duplicates|length + iss.same_name|length + iss.unmapped|length }}</div>
+    <div class="s">type changes, duplicates, unmapped</div></div>
+</div>
+
+{% if editor %}
+<details class="card-sec" {{ 'open' if not summ.sources }}>
+  <summary><span>Bring in accounts</span><span class="muted">re-importing keeps your mappings</span></summary>
+  <form method="post" enctype="multipart/form-data" class="mini" style="padding:10px 14px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="import-zoho">
+    <label>Zoho Books chart of accounts (Chart_of_Accounts.csv from a Zoho export) <input type="file" name="file" accept=".csv,text/csv" required></label>
+    <button type="submit" class="primary-sm">Import</button>
+  </form>
+  {% if c.get('books') %}
+  <form method="post" class="mini" style="padding:0 14px 10px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="from-books">
+    <button type="submit" class="btn">Set up from this client's Finance categories and bank accounts</button>
+  </form>
+  {% endif %}
+  <p class="hint" style="padding:0 14px 10px">Each old account gets a clean account of the same name with a corrected type, so nothing is lost. Then merge duplicates and fix types under “Needs a decision”. History is re-run through these mappings later; old records aren't edited.</p>
+</details>
+{% endif %}
+
+{% if show == 'issues' %}
+<details class="card-sec" open>
+  <summary><span>Type changes suggested</span><span class="muted">{{ iss.type_changes|length }}</span></summary>
+  {% if iss.type_changes %}
+  <div class="scroll"><table><tr><th>Old account</th><th>Old type</th><th>Now</th><th>Why</th>{% if editor %}<th></th>{% endif %}</tr>
+  {% for x in iss.type_changes %}
+    <tr><td>{{ x.source_name }}</td><td class="muted">{{ x.source_type }}</td><td>{{ x.target }}<br><span class="small muted">{{ x.target_type }}</span></td><td class="small" style="white-space:normal;max-width:260px">{{ x.note[14:] if x.note else '' }}</td>
+      {% if editor %}<td>{% if x.status != 'confirmed' %}<form method="post" class="mini"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="confirm"><input type="hidden" name="source" value="{{ x.source }}"><input type="hidden" name="key" value="{{ x.source_key }}"><button type="submit" class="link">OK</button></form>{% else %}<span class="pill ok">OK</span>{% endif %} <a class="small" href="{{ url_for('accounts_page', slug=c.slug, show='chart') }}#a{{ x.account_id }}">change</a></td>{% endif %}</tr>
+  {% endfor %}</table></div>
+  {% else %}<div class="empty">None.</div>{% endif %}
+</details>
+
+<details class="card-sec" open>
+  <summary><span>Possible duplicates</span><span class="muted">{{ iss.duplicates|length + iss.same_name|length }}</span></summary>
+  {% if iss.duplicates or iss.same_name %}
+  <div class="scroll"><table><tr><th>What</th><th>Accounts</th>{% if editor %}<th>Merge</th>{% endif %}</tr>
+  {% for d in iss.duplicates %}{% set fam = d.accounts %}
+    <tr><td>{{ d.family }}</td><td class="small" style="white-space:normal;max-width:420px">{% for a in fam %}{{ a }}{{ ' · ' if not loop.last }}{% endfor %}</td>
+      {% if editor %}<td>{% include "_merge_form.html" %}</td>{% endif %}</tr>
+  {% endfor %}
+  {% for d in iss.same_name %}{% set fam = d.accounts %}
+    <tr><td>Same name ({{ types[d.type][0] }})</td><td class="small" style="white-space:normal;max-width:420px">{% for a in fam %}{{ a }}{{ ' · ' if not loop.last }}{% endfor %}</td>
+      {% if editor %}<td>{% include "_merge_form.html" %}</td>{% endif %}</tr>
+  {% endfor %}</table></div>
+  <p class="hint" style="padding:0 14px">Merging moves the old accounts (and any sub-accounts) onto the account you pick; the merged account disappears from the clean chart. Accounts that are really different (e.g. separate state tax payables) can stay as sub-accounts — set their parent on the Chart tab instead.</p>
+  {% else %}<div class="empty">None found.</div>{% endif %}
+</details>
+
+{% if iss.unmapped %}
+<details class="card-sec" open>
+  <summary><span>Old accounts with no clean account</span><span class="muted">{{ iss.unmapped|length }}</span></summary>
+  <table>{% for x in iss.unmapped %}<tr><td>{{ x.source_name }}</td><td class="muted">{{ x.source_type }}</td><td><a href="{{ url_for('accounts_page', slug=c.slug, show='maps') }}">map it</a></td></tr>{% endfor %}</table>
+</details>
+{% endif %}
+
+{% elif show == 'chart' %}
+<details class="card-sec" open>
+  <summary><span>Clean chart</span><span class="muted">{{ chart|length }} accounts</span></summary>
+  <div class="scroll"><table class="fin tight">
+    <tr><th>Account</th><th class="hide-sm">Code</th><th>Type</th><th class="n hide-sm">Old accounts</th>{% if editor %}<th></th>{% endif %}</tr>
+    {% set ns = namespace(cls='') %}
+    {% for a in chart %}
+      {% if a.depth == 0 and a.cls != ns.cls %}{% set ns.cls = a.cls %}<tr class="sec"><td colspan="5">{{ {'asset': 'Assets', 'liability': 'Liabilities', 'equity': 'Equity', 'income': 'Income', 'expense': 'Costs and expenses'}.get(a.cls, a.cls) }}</td></tr>{% endif %}
+    <tr id="a{{ a.id }}" class="{{ '' if a.active else 'muted' }}"><td style="padding-left:{{ 10 + a.depth * 18 }}px">{{ a.name }}{% if not a.active %} <span class="pill soon">inactive</span>{% endif %}</td>
+      <td class="hide-sm muted">{{ a.code or '' }}</td><td class="small">{{ a.label }}</td><td class="n hide-sm">{{ a.sources or '' }}</td>
+      {% if editor %}<td><details class="inline"><summary class="btn">Edit</summary>
+        <form method="post" class="mini" style="display:grid;gap:6px;min-width:280px">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="save-account"><input type="hidden" name="id" value="{{ a.id }}"><input type="hidden" name="anchor" value="#a{{ a.id }}">
+          <label>Name <input name="name" value="{{ a.name }}" required></label>
+          <label>Code <input name="code" value="{{ a.code or '' }}" size="8"></label>
+          <label>Type <select name="type">{% for k, t in types.items() %}<option value="{{ k }}" {{ 'selected' if k == a.type }}>{{ t[0] }}</option>{% endfor %}</select></label>
+          <label>Under (leave empty for top level) <input name="parent_name" list="acct-list" value="{{ a.full.rsplit(':', 1)[0] if a.parent_id else '' }}"></label>
+          <label><input type="checkbox" name="active" value="1" {{ 'checked' if a.active }}> Active</label>
+          <button type="submit" class="primary-sm">Save</button>
+        </form></details></td>{% endif %}</tr>
+    {% endfor %}
+  </table></div>
+</details>
+{% if editor %}
+<details class="card-sec">
+  <summary><span>Add an account</span></summary>
+  <form method="post" class="mini" style="display:grid;gap:6px;max-width:420px;padding:10px 14px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="save-account"><input type="hidden" name="active" value="1">
+    <label>Name <input name="name" required></label><label>Code <input name="code" size="8"></label>
+    <label>Type <select name="type">{% for k, t in types.items() %}<option value="{{ k }}">{{ t[0] }}</option>{% endfor %}</select></label>
+    <label>Under (leave empty for top level) <input name="parent_name" list="acct-list"></label>
+    <button type="submit" class="primary-sm">Add</button>
+  </form>
+</details>
+{% endif %}
+
+{% else %}
+<details class="card-sec" open>
+  <summary><span>Old accounts → clean accounts</span><span class="muted">{{ maps|length }}</span></summary>
+  <div class="scroll"><table class="fin tight">
+    <tr><th>Old account</th><th class="hide-sm">From</th><th class="hide-sm">Old type</th><th>Clean account</th><th></th></tr>
+    {% for m in maps %}
+    <tr class="{{ '' if m.source_active else 'muted' }}"><td>{{ m.source_name }}{% if not m.source_active %} <span class="pill soon">inactive</span>{% endif %}</td>
+      <td class="hide-sm small">{{ {'zoho': 'Zoho', 'category': 'Finance category', 'bank': 'Bank feed'}.get(m.source, m.source) }}</td><td class="hide-sm small muted">{{ m.source_type }}</td>
+      <td>{% if editor %}<form method="post" class="mini" style="display:flex;gap:6px"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="map-name"><input type="hidden" name="source" value="{{ m.source }}"><input type="hidden" name="key" value="{{ m.source_key }}">
+        <input name="account_name" list="acct-list" value="{{ m.target or '' }}" style="min-width:240px"><button type="submit" class="link">Save</button></form>{% else %}{{ m.target or '—' }}{% endif %}</td>
+      <td><span class="pill {{ 'ok' if m.status == 'confirmed' else 'soon' }}">{{ 'confirmed' if m.status == 'confirmed' else 'suggested' }}</span></td></tr>
+    {% endfor %}
+  </table></div>
+</details>
+{% endif %}
+{% endblock %}

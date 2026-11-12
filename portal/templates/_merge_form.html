@@ -1,0 +1,3 @@
+<form method="post" class="mini" style="display:grid;gap:4px;max-width:240px"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="merge"><input type="hidden" name="anchor" value="">
+  <select name="from_id" style="max-width:240px">{% for a in chart if a.full in fam %}<option value="{{ a.id }}">{{ a.full }}</option>{% endfor %}</select>
+  <span class="small">into</span><input name="into" list="acct-list" placeholder="account to keep" style="max-width:240px"><button type="submit" class="link" style="justify-self:start">Merge</button></form>

@@ -14,6 +14,14 @@ Finance v2 = the live Finance portal (finance-portal-1112c, deployed 11/12/2026)
    merge applied cleanly; `tests/smoke_test.py` publishes a sample snapshot and opens every page of both kinds of
    client.
 
+3. Step 1 — chart of accounts (`portal/coa.py`, page `/c/<slug>/accounts`, Maintenance → Chart of accounts;
+   Platform clients: admins, link on their nav). Clean accounts (`ledger_account`: type, parent, code, active) and
+   old → new mappings (`account_map`: Zoho accounts, Finance categories, bank-feed accounts). Zoho import proposes one
+   clean account per old one with corrected types (e.g. line of credit / processor set up as Bank, expenses set up as
+   liabilities, Inventory as other current asset), flags duplicate families (sales tax payables, inventory, A/P,
+   opening balance, contributions / distributions, wages payable, 941) and same-name accounts, and lets you merge,
+   re-map, re-type and re-parent. Re-importing keeps your mappings. Tests: `tests/test_coa.py`.
+
 ## Goal: Finance keeps real books (CRS and later clients)
 
 Foundation (the Unscatter platform) takes in the client's data, cleans it and stores it as related entities:

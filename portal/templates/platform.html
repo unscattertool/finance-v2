@@ -18,6 +18,7 @@
 <nav class="tabs no-print">
   <a href="{{ url_for('client_page', slug=c.slug) }}" class="{{ 'on' if not page }}">Overview</a>
   {% for name, title in pages %}<a href="{{ url_for('platform_module', slug=c.slug, page=name) }}" class="{{ 'on' if page == name }}">{{ title }}</a>{% endfor %}
+  {% if admin %}<a href="{{ url_for('accounts_page', slug=c.slug) }}">Chart of accounts</a>{% endif %}
 </nav>
 
 {# ============================================================ overview #}

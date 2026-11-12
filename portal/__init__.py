@@ -1386,6 +1386,89 @@ def create_app(instance_path=None):
         log("receipt_filed", id=rid, ok=ok)
         return jsonify(ok=ok), (200 if ok else 400)
 
+    # ------------------------------------------------------------------ chart of accounts (books step 1)
+    @app.route("/c/<slug>/accounts", methods=["GET", "POST"])
+    @login_required
+    def accounts_page(slug):
+        c = client_or_404(slug)
+        if not (c.get("books") or c.get("source") == "platform"):
+            abort(404)
+        from . import coa
+        coa.ensure(db())
+        editor = can_edit(slug) and (bool(c.get("books")) or is_admin())  # platform clients: Unscatter admins only
+        if request.method == "POST":
+            if not editor:
+                abort(403)
+            f = request.form
+            act = f.get("action")
+            user = g.user["email"]
+            try:
+                if act == "import-zoho":
+                    up = request.files.get("file")
+                    if not up or not up.filename:
+                        raise ValueError("Choose the Chart_of_Accounts.csv from a Zoho Books export.")
+                    items = coa.read_zoho_csv(up.read(5_000_000).decode("utf-8-sig", errors="replace"))
+                    new = coa.import_sources(db(), slug, "zoho", items, user)
+                    made = coa.propose(db(), slug, "zoho", items, user)
+                    log("coa_import", user=user, client=slug, rows=len(items), new=new)
+                    flash("Read %d Zoho accounts (%d new); %d clean accounts proposed. Review the type changes and duplicates below." %
+                          (len(items), new, made), "ok")
+                elif act == "from-books":
+                    cats, banks = coa.sources_from_books(db(), slug)
+                    n1 = coa.import_sources(db(), slug, "category", cats, user)
+                    n2 = coa.import_sources(db(), slug, "bank", banks, user)
+                    made = coa.propose(db(), slug, "category", cats, user) + coa.propose(db(), slug, "bank", banks, user)
+                    log("coa_from_books", user=user, client=slug, made=made)
+                    flash("Set up from %d categories and %d bank accounts (%d new); %d clean accounts proposed." %
+                          (len(cats), len(banks), n1 + n2, made), "ok")
+                elif act == "map":
+                    aid = int(f["account_id"]) if (f.get("account_id") or "").isdigit() else None
+                    coa.set_mapping(db(), slug, f.get("source", ""), f.get("key", ""), aid, user, _txt(f.get("note"), 200) or None)
+                    log("coa_map", user=user, client=slug, source=f.get("source"), key=f.get("key"), account=aid)
+                    flash("Mapping saved.", "ok")
+                elif act == "map-name":
+                    names = coa.by_full_name(db(), slug)
+                    want = (f.get("account_name") or "").strip().lower()
+                    if want not in names:
+                        raise ValueError("Pick an account from the list (type to search).")
+                    coa.set_mapping(db(), slug, f.get("source", ""), f.get("key", ""), names[want], user)
+                    log("coa_map", user=user, client=slug, source=f.get("source"), key=f.get("key"), account=names[want])
+                    flash("Mapping saved.", "ok")
+                elif act == "confirm":
+                    coa.confirm(db(), slug, f.get("source", ""), f.get("key", ""), user)
+                    flash("Confirmed.", "ok")
+                elif act == "merge":
+                    names = coa.by_full_name(db(), slug)
+                    src = int(f["from_id"]) if (f.get("from_id") or "").isdigit() else None
+                    want = (f.get("into") or "").strip().lower()
+                    if not src or want not in names:
+                        raise ValueError("Pick the account to merge into from the list.")
+                    coa.merge(db(), slug, src, names[want], user)
+                    log("coa_merge", user=user, client=slug, src=src, into=names[want])
+                    flash("Merged.", "ok")
+                elif act == "save-account":
+                    aid = int(f["id"]) if (f.get("id") or "").isdigit() else None
+                    pname = (f.get("parent_name") or "").strip().lower()
+                    pid = None
+                    if pname:
+                        names = coa.by_full_name(db(), slug)
+                        if pname not in names:
+                            raise ValueError("Pick the parent account from the list (or leave it empty).")
+                        pid = names[pname]
+                    coa.save_account(db(), slug, user, aid, _txt(f.get("name"), 120), _txt(f.get("code"), 20), f.get("type"), pid,
+                                     f.get("active") == "1", _txt(f.get("description"), 300))
+                    log("coa_account", user=user, client=slug, id=aid)
+                    flash("Account saved.", "ok")
+                else:
+                    abort(400)
+            except ValueError as e:
+                flash(str(e))
+            return redirect(url_for("accounts_page", slug=slug, show=request.args.get("show")) + (f.get("anchor") or ""))
+        show = request.args.get("show", "issues")
+        return render_template("accounts.html", c=c, show=show, summ=coa.summary(db(), slug), chart=coa.accounts(db(), slug),
+                               maps=coa.mappings(db(), slug), iss=coa.issues(db(), slug), types=coa.TYPES,
+                               editor=editor)
+
     @app.route("/c/<slug>/checks")
     @login_required
     def checks_page(slug):
