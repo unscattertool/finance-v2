@@ -22,6 +22,16 @@ Finance v2 = the live Finance portal (finance-portal-1112c, deployed 11/12/2026)
    opening balance, contributions / distributions, wages payable, 941) and same-name accounts, and lets you merge,
    re-map, re-type and re-parent. Re-importing keeps your mappings. Tests: `tests/test_coa.py`.
 
+4. Step 2 (WWK) — double-entry journal (`portal/journal.py`, page `/c/<slug>/ledger`, Maintenance → Ledger).
+   `journal` + `journal_line` (cents, every entry balances). Posted from the register: each entry = bank line +
+   one line per split (card tips, sales tax, tax payments) + the rest to the category's account, all through the
+   chart mappings (so a merge moves history without editing entries). Re-posts automatically when the register,
+   splits, categories or chart change (fingerprint). `compare` runs P&L / balance sheet / cash flow for every month,
+   vendors, transactions and the category list from the register and from the journal — WWK (11/2 copy): 876
+   entries, 33 checks, 0 differences. "Use the ledger for reports" switches the report pages to the journal.
+   Next: run the check on a current copy of the live database; then make the balance sheet / cash flow type-driven
+   (they still name WWK categories) and let journal entries be made directly (step 3 registers).
+
 ## Goal: Finance keeps real books (CRS and later clients)
 
 Foundation (the Unscatter platform) takes in the client's data, cleans it and stores it as related entities:

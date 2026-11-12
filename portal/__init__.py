@@ -1386,6 +1386,48 @@ def create_app(instance_path=None):
         log("receipt_filed", id=rid, ok=ok)
         return jsonify(ok=ok), (200 if ok else 400)
 
+    # ------------------------------------------------------------------ journal (books step 2)
+    @app.route("/c/<slug>/ledger", methods=["GET", "POST"])
+    @login_required
+    def ledger_page(slug):
+        c = client_or_404(slug)
+        if not c.get("books"):
+            abort(404)
+        from . import journal as J
+        editor = can_edit(slug)
+        if request.method == "POST":
+            if not editor:
+                abort(403)
+            f = request.form
+            act = f.get("action")
+            if act == "use-journal":
+                J.set_enabled(db(), slug, f.get("on") == "1")
+                log("journal_reports", user=g.user["email"], client=slug, on=f.get("on"))
+                flash("Reports now read the ledger." if f.get("on") == "1" else "Reports read the register again.", "ok")
+            elif act == "repost":
+                r = J.post_from_register(db(), slug, g.user["email"], force=True)
+                flash("Re-posted %d entries." % r["posted"], "ok")
+            else:
+                abort(400)
+            return redirect(url_for("ledger_page", slug=slug))
+        try:
+            posted = J.post_from_register(db(), slug, g.user["email"])
+        except ValueError as e:
+            return render_template("message.html", msg="The ledger couldn't be posted: %s" % e), 200
+        s = get_snapshot(c)
+        today = dt.date.today()
+        checks, diffs = J.compare(db(), slug, s, today) if s and s.get("ledger") is not None else (0, [])
+        a_ = request.args
+        as_of = _day(a_.get("as_of")) or today.isoformat()
+        acct = int(a_["account"]) if (a_.get("account") or "").isdigit() else None
+        tb = J.trial_balance(db(), slug, as_of)
+        _, conflicts = J.report_groups(db(), slug)
+        return render_template("ledger.html", c=c, posted=posted, checks=checks, diffs=diffs, tb=tb, as_of=as_of,
+                               acct=acct, acct_name=next((r["account"] for r in tb if r["id"] == acct), None),
+                               entries=J.entries(db(), slug, acct, limit=300 if acct else 60),
+                               unbalanced=J.check_balanced(db(), slug), conflicts=conflicts,
+                               on=J.enabled(db(), slug), editor=editor)
+
     # ------------------------------------------------------------------ chart of accounts (books step 1)
     @app.route("/c/<slug>/accounts", methods=["GET", "POST"])
     @login_required
@@ -1784,6 +1826,11 @@ def create_app(instance_path=None):
         s = get_snapshot(c)
         if not s or "ledger" not in s:
             return render_template("message.html", msg="Reports will appear after the next data refresh."), 200
+        if c.get("books"):
+            from . import journal as J
+            if J.enabled(db(), slug):  # books step 2: reports read the double-entry ledger
+                J.post_from_register(db(), slug, (g.get("user") or {}).get("email", "system"))
+                s = J.journal_snapshot(db(), slug, s)
         today = dt.date.today()
         first = dt.date.fromisoformat(s["ledger"][0][0]) if s["ledger"] else today
         a_ = request.args

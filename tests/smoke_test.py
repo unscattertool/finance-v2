@@ -67,7 +67,7 @@ def main():
         c.post("/login", data={"email": "admin@example.com", "password": "correct horse battery", "csrf_token": tok})
         bad = []
         for u in ["/", "/c/crs/", "/c/crs/p/sales", "/c/crs/p/sales-tax", "/c/crs/p/receivables", "/c/crs/p/cleanup", "/c/crs/settings",
-                  "/c/wwk/", "/c/wwk/reports/pl", "/c/wwk/reports/sales-tax", "/c/wwk/settings", "/c/wwk/accounts", "/c/crs/accounts", "/c/crs/accounts?show=chart", "/c/crs/accounts?show=maps"]:
+                  "/c/wwk/", "/c/wwk/reports/pl", "/c/wwk/reports/sales-tax", "/c/wwk/settings", "/c/wwk/accounts", "/c/crs/accounts", "/c/crs/accounts?show=chart", "/c/crs/accounts?show=maps", "/c/wwk/ledger"]:
             code = c.get(u).status_code
             print(code, u)
             if code >= 400:
@@ -92,6 +92,15 @@ def main():
         r = c.post("/c/crs/accounts", data={"csrf_token": tok, "action": "not-dup", "ids": ids}, follow_redirects=True)
         assert "Same thing, different name" not in r.get_data(as_text=True)
         print("200 chart import + not-the-same")
+        # ledger: switch reports to the journal and back
+        page = c.get("/c/wwk/ledger").get_data(as_text=True)
+        assert "Trial balance" in page, page[-1500:]
+        r = c.post("/c/wwk/ledger", data={"csrf_token": tok, "action": "use-journal", "on": "1"}, follow_redirects=True)
+        assert "Reports now read the ledger" in r.get_data(as_text=True)
+        for u in ("/c/wwk/reports/pl", "/c/wwk/reports/balance-sheet", "/c/wwk/reports/cash-flow", "/c/wwk/reports/transactions"):
+            assert c.get(u).status_code == 200, u
+        c.post("/c/wwk/ledger", data={"csrf_token": tok, "action": "use-journal", "on": "0"})
+        print("200 ledger + reports from the ledger")
         print("OK")
     finally:
         shutil.rmtree(inst, ignore_errors=True)

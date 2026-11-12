@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Ledger · {{ c.name }}{% endblock %}
+{% block heading %}{{ c.name }} · Ledger{% endblock %}
+{% block sub %}<p>Double-entry books posted from the register: every entry is a set of lines that add to zero. Accounts come from the chart of accounts.</p>{% endblock %}
+{% block body %}
+<nav class="tabs no-print">
+  <a href="{{ url_for('client_page', slug=c.slug) }}">← Dashboard</a>
+  <a href="{{ url_for('accounts_page', slug=c.slug) }}">Chart of accounts</a>
+  <a href="{{ url_for('report', slug=c.slug, kind='pl') }}">Reports</a>
+</nav>
+
+<div class="tiles">
+  <div class="tile"><div class="k">Journal entries</div><div class="v">{{ posted.posted }}</div><div class="s">one per register entry</div></div>
+  <div class="tile"><div class="k">Balanced</div><div class="v">{{ 'Yes' if not unbalanced else 'No — %d' % unbalanced|length }}</div><div class="s">debits = credits on every entry</div></div>
+  <div class="tile"><div class="k">Reports match the register</div><div class="v">{{ 'Yes' if not diffs else 'No — %d' % diffs|length }}</div>
+    <div class="s">{{ checks }} checks: P&amp;L, balance sheet and cash flow for every month, vendors, transactions</div></div>
+  <div class="tile"><div class="k">Reports read</div><div class="v">{{ 'Ledger' if on else 'Register' }}</div>
+    {% if editor %}<form method="post" class="mini"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="use-journal">
+      <input type="hidden" name="on" value="{{ '0' if on else '1' }}"><button type="submit" class="link small">{{ 'Switch back to the register' if on else 'Use the ledger for reports' }}</button></form>{% endif %}</div>
+</div>
+
+{% if diffs %}
+<details class="card-sec" open>
+  <summary><span>Where the ledger's reports differ from the register's</span><span class="muted">{{ diffs|length }}</span></summary>
+  <p class="hint" style="padding:0 14px">Expected after merging or re-mapping categories in the chart (the ledger then groups them differently). Otherwise it's a bug — the two should match line for line.</p>
+  <div class="scroll"><table class="fin tight"><tr><th>Report</th><th>Where</th><th>Register</th><th>Ledger</th></tr>
+  {% for d in diffs[:40] %}<tr><td>{{ d.check }}</td><td class="small">{{ d.where }}</td><td class="small" style="white-space:normal;max-width:320px">{{ d.register }}</td><td class="small" style="white-space:normal;max-width:320px">{{ d.journal }}</td></tr>{% endfor %}
+  </table></div>
+</details>
+{% endif %}
+{% if conflicts %}
+<div class="warn">Some accounts have categories from different P&amp;L groups merged into them; the ledger uses the first group found. Fix the category groups or the merge.</div>
+{% endif %}
+
+<details class="card-sec" open id="tb">
+  <summary><span>Trial balance</span><span class="muted">as of {{ as_of }}</span></summary>
+  <form method="get" class="mini no-print" style="padding:6px 14px"><label>As of <input type="date" name="as_of" value="{{ as_of }}"></label> <button class="btn">Show</button></form>
+  <div class="scroll"><table class="fin tight">
+    <tr><th>Account</th><th class="hide-sm">Type</th><th class="n">Debit</th><th class="n">Credit</th><th class="n hide-sm">Lines</th></tr>
+    {% set ns = namespace(cls='', d=0, k=0) %}
+    {% for r in tb %}
+      {% if r.cls != ns.cls %}{% set ns.cls = r.cls %}<tr class="sec"><td colspan="5">{{ {'asset': 'Assets', 'liability': 'Liabilities', 'equity': 'Equity', 'income': 'Income', 'expense': 'Costs and expenses'}.get(r.cls, r.cls) }}</td></tr>{% endif %}
+      {% set ns.d = ns.d + r.debit %}{% set ns.k = ns.k + r.credit %}
+      <tr><td><a href="{{ url_for('ledger_page', slug=c.slug, account=r.id, as_of=as_of) }}#je">{{ r.account }}</a></td><td class="hide-sm small">{{ r.type|replace('_', ' ') }}</td>
+        <td class="n">{{ r.debit|money if r.debit else '' }}</td><td class="n">{{ r.credit|money if r.credit else '' }}</td><td class="n hide-sm muted">{{ r.lines }}</td></tr>
+    {% endfor %}
+    <tr class="tot"><td>Total</td><td class="hide-sm"></td><td class="n">{{ ns.d|money }}</td><td class="n">{{ ns.k|money }}</td><td class="hide-sm"></td></tr>
+  </table></div>
+</details>
+
+<details class="card-sec" open id="je">
+  <summary><span>{% if acct_name %}Entries touching {{ acct_name }}{% else %}Latest journal entries{% endif %}</span>
+    <span class="muted">{% if acct %}<a href="{{ url_for('ledger_page', slug=c.slug, as_of=as_of) }}#je">show all</a>{% else %}newest {{ entries|length }}{% endif %}</span></summary>
+  <div class="scroll"><table class="fin tight">
+    <tr><th>Date</th><th>Entry</th><th>Account</th><th class="n">Debit</th><th class="n">Credit</th></tr>
+    {% for j in entries %}
+      {% for l in j.lines %}
+      <tr{% if loop.first %} style="border-top:2px solid var(--line, #ddd)"{% endif %}>
+        <td class="small">{% if loop.first %}{{ j.date }}{% endif %}</td>
+        <td class="small" style="white-space:normal;max-width:300px">{% if loop.first %}{{ j.payee or j.description }}{% if j.check_no %} · #{{ j.check_no }}{% endif %}{% if j.state %} <span class="pill soon">{{ j.state }}</span>{% endif %}{% endif %}{% if l.memo %} <span class="muted">{{ l.memo }}</span>{% endif %}</td>
+        <td style="padding-left:{{ 10 if l.debit else 28 }}px"><a href="{{ url_for('ledger_page', slug=c.slug, account=l.account_id, as_of=as_of) }}#je">{{ l.account }}</a></td>
+        <td class="n">{{ l.debit|money if l.debit else '' }}</td><td class="n">{{ l.credit|money if l.credit else '' }}</td></tr>
+      {% endfor %}
+    {% endfor %}
+  </table></div>
+</details>
+{% if editor %}
+<form method="post" class="mini no-print" style="padding:6px 14px"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="repost">
+  <button class="btn">Re-post from the register</button> <span class="small muted">Happens on its own whenever the register, splits, categories or chart change.</span></form>
+{% endif %}
+{% endblock %}
