@@ -1022,12 +1022,17 @@ def create_app(instance_path=None):
             inc = dict(C.income_split(c["shifts_db"], db(), slug, a_, b_), which=which, tie=T.period_status(db(), slug, a_, b_))
             cash_till = C.till(db(), slug, c["shifts_db"], today)
         cats = [x["name"] for x in B.categories(db(), slug)] if c.get("books") else []
-        card_pending = None
+        card_pending = card_watch = None
         if c.get("books") and c.get("shifts_db"):
             try:
                 card_pending = T.pending_batches(db(), slug)
             except Exception as e:
                 app.logger.warning("pending batches failed for %s: %s", slug, e)
+            try:
+                from . import cardwatch as CW
+                card_watch = CW.check(db(), slug, c.get("shifts_db"))
+            except Exception as e:
+                app.logger.warning("card watch failed for %s: %s", slug, e)
         proj = payroll = None
         if c.get("books") and s:
             target = _day(request.args.get("proj")) or (dt.date.today() + dt.timedelta(days=1)).isoformat()
@@ -1068,7 +1073,7 @@ def create_app(instance_path=None):
             RC.ensure(db())
             billdocs = RC.for_bills(db(), slug)
         return render_template("client.html", c=c, s=s, show=c.get("show", {}), billdocs=billdocs, inc=inc, till=cash_till, cats=cats, card_pending=card_pending,
-                               proj=proj, payroll=payroll)
+                               proj=proj, payroll=payroll, card_watch=card_watch)
 
     def _mdy_s(iso):
         d = dt.date.fromisoformat(iso)
@@ -1562,6 +1567,30 @@ def create_app(instance_path=None):
     @app.route("/c/<slug>/tips", methods=["GET", "POST"])
     @login_required
     def tips_page(slug):
+        return _tips_page(slug)
+
+    @app.route("/c/<slug>/card-watch", methods=["POST"])
+    @login_required
+    def card_watch_mark(slug):
+        c = client_or_404(slug)
+        if not (c.get("books") and c.get("shifts_db")) or not can_edit(slug):
+            abort(403)
+        from . import cardwatch as CW
+        f = request.form
+        day = _day(f.get("date"))
+        if not day:
+            abort(400)
+        if f.get("action") == "undo":
+            CW.undismiss(db(), slug, day)
+            flash("%s is checked again." % day, "ok")
+        else:
+            why = {"closed": "Closed (no sales)", "checked": "Checked"}.get(f.get("why"), "Checked")
+            CW.dismiss(db(), slug, day, why + ((": " + _txt(f.get("note"), 200)) if f.get("note") else ""), g.user["email"])
+            log("card_watch_ok", user=g.user["email"], client=slug, day=day, why=why)
+            flash("%s marked: %s." % (day, why.lower()), "ok")
+        return redirect(request.referrer or url_for("tips_page", slug=slug))
+
+    def _tips_page(slug):
         c = client_or_404(slug)
         if not (c.get("books") and c.get("shifts_db")):
             abort(404)
@@ -1743,7 +1772,9 @@ def create_app(instance_path=None):
         pi = PI.status(db(), slug)
         from . import processor as PR
         pr = PR.status(db(), slug, c)
-        return render_template("tips.html", c=c, tc=tc, t=t, ss=ss, la=la, pi=pi, pr=pr, editor=can_edit(slug), admin=is_admin(), stx=_stx(slug), bd=_bd(c))
+        from . import cardwatch as CW
+        cw = CW.check(db(), slug, c.get("shifts_db"))
+        return render_template("tips.html", c=c, tc=tc, t=t, ss=ss, la=la, pi=pi, pr=pr, editor=can_edit(slug), admin=is_admin(), stx=_stx(slug), bd=_bd(c), cw=cw)
 
     @app.route("/c/<slug>/refresh", methods=["POST"])
     @login_required

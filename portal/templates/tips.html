@@ -15,6 +15,29 @@
     <div class="s">{{ t.unmatched_count }} deposit{{ '' if t.unmatched_count == 1 else 's' }} · kept as card sales until matched</div></div>
 </div>
 
+
+<details class="card-sec" {{ 'open' if cw.alerts }} id="watch">
+  <summary><span>Card check — every day's card sales to a closed batch and the bank (Heartland)</span>
+    <span class="muted">{% if cw.alerts %}<span class="pill late">{{ cw.alerts|length }} to check</span>{% else %}all clear{% endif %}</span></summary>
+  {% if cw.alerts %}<div class="alertbox" style="margin:10px 14px"><ul>{% for a in cw.alerts %}<li>{{ a.text }}</li>{% endfor %}</ul></div>{% endif %}
+  <p class="hint" style="padding:0 14px">A batch that never closes never shows up on a batch report, so this starts from what was sold. Each day the restaurant was open
+    (closeouts in Shifts, shifts on the schedule, or a usual open day) needs a Heartland report; card payments must equal the closed batches; and the
+    day's card total must reach the bank within {{ 3 }} days. Mark days the restaurant was closed so they stop showing.</p>
+  <div class="scroll"><table class="fin tight">
+    <tr><th>Day</th><th class="n">Card payments</th><th class="n">Closed batches</th><th class="hide-sm">Closeouts / scheduled</th><th>Status</th>{% if editor %}<th></th>{% endif %}</tr>
+    {% for d in cw.days %}
+    <tr><td>{{ d.dow }} {{ d.date|mdy }}</td>
+      <td class="n">{{ d.card|money if d.card is not none else '—' }}</td>
+      <td class="n">{{ d.batch|money if d.batch is not none else '—' }}{% if d.open_batches %} <span class="pill late">open</span>{% endif %}</td>
+      <td class="hide-sm small">{{ d.closeouts }} / {{ d.scheduled }}{% if d.usual %} · usual open day{% endif %}</td>
+      <td class="small">{% if d.ok %}<span class="pill ok">{{ d.ok.why }}</span>{% elif cw.alerts|selectattr('date', 'equalto', d.date)|list %}<span class="pill late">check</span>{% elif d.reported %}ok{% else %}<span class="muted">no sales expected</span>{% endif %}</td>
+      {% if editor %}<td>{% if d.ok %}<form method="post" action="{{ url_for('card_watch_mark', slug=c.slug) }}" class="mini"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="date" value="{{ d.date }}"><input type="hidden" name="action" value="undo"><button class="link small">undo</button></form>
+        {% elif cw.alerts|selectattr('date', 'equalto', d.date)|list %}<form method="post" action="{{ url_for('card_watch_mark', slug=c.slug) }}" class="mini" style="display:flex;gap:6px;flex-wrap:wrap"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="date" value="{{ d.date }}">
+          <button class="link small" name="why" value="closed">Closed that day</button><button class="link small" name="why" value="checked">Checked, it's fine</button></form>{% endif %}</td>{% endif %}</tr>
+    {% endfor %}
+  </table></div>
+</details>
+
 {% if t.pending.days %}
 <details class="card-sec" open id="pending">
   <summary><span>Card deposits on the way (batch reports, not in the bank yet)</span><span class="muted">{{ t.pending.days|length }} · {{ t.pending.total|money }}</span></summary>
