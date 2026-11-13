@@ -1014,16 +1014,19 @@ def payroll_estimate(db, client, today=None, until=None, shifts_path=None, ancho
 
 def payroll_paid(db, client, period_end, pay_day):
     """Has the payroll for the period ending `period_end` come out of the bank? Yes when a Gusto run for that period is
-    imported, or Gusto net-pay / tax debits show up from the day after the period ends to 10 days after the pay day."""
+    imported, or Gusto net-pay / tax debits (or a payroll entry paid through Gusto) show up from the day after the period ends to 10 days after the pay day."""
     try:
         if db.execute("SELECT 1 FROM gusto_run WHERE client=? AND period_end=? AND kind='Regular'", (client, period_end.isoformat())).fetchone():
             return True
     except sqlite3.OperationalError:
         pass
     a, b = (period_end + dt.timedelta(days=1)).isoformat(), (pay_day + dt.timedelta(days=10)).isoformat()
-    for r in db.execute("SELECT description, amount FROM entry WHERE client=? AND status!='void' AND amount<0 AND date BETWEEN ? AND ?", (client, a, b)):
+    for r in db.execute("SELECT description, payee, category, amount FROM entry WHERE client=? AND status!='void' AND amount<0 AND date BETWEEN ? AND ?", (client, a, b)):
         desc = (r["description"] or "").upper()
-        if "GUSTO" in desc and ("NET" in desc or "/TAX" in desc or " TAX" in desc):
+        # Gusto's own debits, or a payroll paid another way through Gusto (e.g. "Gusto payment plan … payroll paid with
+        # Gusto financing", entered by hand as Payroll - Wages)
+        if "GUSTO" in desc + " " + (r["payee"] or "").upper() and ("NET" in desc or "/TAX" in desc or " TAX" in desc
+                                                                   or r["category"] in ("Payroll - Wages", "Payroll Taxes")):
             return True
     return False
 
