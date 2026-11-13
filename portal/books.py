@@ -956,11 +956,22 @@ def payroll_estimate(db, client, today=None, until=None, shifts_path=None, ancho
     end = a + dt.timedelta(days=14 * k)
     while end + dt.timedelta(days=lag) < today:
         end += dt.timedelta(days=14)
+    # a pay day that has passed stays on the list until the payroll actually comes out of the bank (Gusto debits)
+    # or a Gusto run for that period is imported — a payroll not run yet is still money going out
+    first = end
+    for back in (1, 2):
+        e0 = end - dt.timedelta(days=14 * back)
+        if (today - (e0 + dt.timedelta(days=lag))).days <= 21 and not payroll_paid(db, client, e0, e0 + dt.timedelta(days=lag)):
+            first = e0
+    end = first
     out = []
     while True:
         pay = end + dt.timedelta(days=lag)
-        if out and pay > until:
+        if out and pay > until and pay >= today:
             break
+        if pay < today and payroll_paid(db, client, end, pay):
+            end += dt.timedelta(days=14)
+            continue
         start = end - dt.timedelta(days=13)
         w = t = 0.0
         known = est_days = 0
@@ -977,9 +988,10 @@ def payroll_estimate(db, client, today=None, until=None, shifts_path=None, ancho
             t += tips[iso] if iso in tips else wd_avg(tips, d.weekday(), iso)
             d += dt.timedelta(days=1)
         gross = w + t + sal
+        late = pay < today
         out.append(dict(pay_day=pay.isoformat(), start=start.isoformat(), end=end.isoformat(), wages=round(w, 2), tips=round(t, 2),
                         salaries=round(sal, 2), er_tax=round(gross * rate, 2), total=round(gross * (1 + rate), 2), days_known=known,
-                        days_estimated=est_days))
+                        days_estimated=est_days, late=late, days_late=(today - pay).days if late else 0))
         end += dt.timedelta(days=14)
         if len(out) > 30:
             break
@@ -998,6 +1010,22 @@ def payroll_estimate(db, client, today=None, until=None, shifts_path=None, ancho
     last = runs[0] if runs else None
     return dict(pay_days=out, rate=round(rate, 4), lag=lag, has_data=bool(wages) or bool(salaries), salaries=salaries,
                 last_run=dict(pay_day=last["pay_day"], total=round((last["gross"] or 0) + (last["er_tax"] or 0), 2)) if last else None)
+
+
+def payroll_paid(db, client, period_end, pay_day):
+    """Has the payroll for the period ending `period_end` come out of the bank? Yes when a Gusto run for that period is
+    imported, or Gusto net-pay / tax debits show up from the day after the period ends to 10 days after the pay day."""
+    try:
+        if db.execute("SELECT 1 FROM gusto_run WHERE client=? AND period_end=? AND kind='Regular'", (client, period_end.isoformat())).fetchone():
+            return True
+    except sqlite3.OperationalError:
+        pass
+    a, b = (period_end + dt.timedelta(days=1)).isoformat(), (pay_day + dt.timedelta(days=10)).isoformat()
+    for r in db.execute("SELECT description, amount FROM entry WHERE client=? AND status!='void' AND amount<0 AND date BETWEEN ? AND ?", (client, a, b)):
+        desc = (r["description"] or "").upper()
+        if "GUSTO" in desc and ("NET" in desc or "/TAX" in desc or " TAX" in desc):
+            return True
+    return False
 
 
 # ------------------------------------------------------------------ Gusto payroll preview (pasted before a payroll runs)
@@ -1095,10 +1123,10 @@ def projection(db, client, snap, target, today=None, card_on_the_way=0.0, lookba
     use_pr = bool(payroll and payroll.get("has_data"))
     if use_pr:  # payroll comes from the POS Payroll Summary, not from the last Gusto debits
         for p in payroll["pay_days"]:
-            if today.isoformat() <= p["pay_day"] <= target.isoformat():
-                items.append(dict(date=p["pay_day"], name=("Payroll %s–%s (Gusto preview)" if p.get("gusto") else "Payroll %s–%s (est.)") % (dt.date.fromisoformat(p["start"]).strftime("%-m/%-d"),
+            if p.get("late") or today.isoformat() <= p["pay_day"] <= target.isoformat():
+                items.append(dict(date=today.isoformat() if p.get("late") else p["pay_day"], name=("NOT RUN YET (was due %s) · " % dt.date.fromisoformat(p["pay_day"]).strftime("%-m/%-d") if p.get("late") else "") + ("Payroll %s–%s (Gusto preview)" if p.get("gusto") else "Payroll %s–%s (est.)") % (dt.date.fromisoformat(p["start"]).strftime("%-m/%-d"),
                                                                                     dt.date.fromisoformat(p["end"]).strftime("%-m/%-d")),
-                                  amount=p["total"], kind="Payroll", overdue=False))
+                                  amount=p["total"], kind="Payroll", overdue=bool(p.get("late"))))
     for r in db.execute("SELECT * FROM recurring WHERE client=? AND active=1", (client,)):
         if use_pr and (r["category"] in PAYROLL_PAY_CATS):
             continue

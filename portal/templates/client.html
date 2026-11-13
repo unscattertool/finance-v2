@@ -37,6 +37,11 @@
     {% endif %}
   </nav>
   {% set pr = s.payroll.lastRun if s.payroll else None %}
+  {% set late_pay = (payroll.pay_days|selectattr('late')|list) if payroll and payroll.pay_days else [] %}
+  {% if late_pay %}
+  <div class="alertbox"><b>Payroll not run</b>
+    <ul>{% for p in late_pay %}<li>Payroll for {{ p.start|mdy }} – {{ p.end|mdy }} was due {{ p.pay_day|mdy }} ({{ p.days_late }} day{{ '' if p.days_late == 1 else 's' }} ago) and hasn't come out of the bank. Run it in Gusto. Until it does, the projection counts {{ p.total|money }} as going out today.</li>{% endfor %}</ul></div>
+  {% endif %}
   {% if card_watch and card_watch.alerts %}
   <div class="alertbox"><b>Card money to check ({{ card_watch.alerts|length }})</b>
     <ul>{% for a in card_watch.alerts[:6] %}<li>{{ a.text }}</li>{% endfor %}</ul>
@@ -73,7 +78,7 @@
     {% endif %}
     {% if show.get('payroll', True) and s.payroll %}
     {% if payroll and payroll.pay_days %}{% set np = payroll.pay_days[0] %}
-    <a class="tile tile-link" href="#bills"><div class="k">Next payroll · {{ np.pay_day|mdy }}</div><div class="v">{{ np.total|money }}</div>
+    <a class="tile tile-link" href="#bills"{% if np.late %} style="border-color:#F3B8B2;background:var(--redbg)"{% endif %}><div class="k">{% if np.late %}<span class="neg">Payroll not run yet · was due {{ np.pay_day|mdy }}</span>{% else %}Next payroll · {{ np.pay_day|mdy }}{% endif %}</div><div class="v {{ 'neg' if np.late }}">{{ np.total|money }}</div>
       <div class="s">{{ 'Gusto preview' if np.gusto else 'Estimate from the Time Clock' }} · {{ np.start|mdy }} – {{ np.end|mdy }}{% if np.days_estimated and not np.gusto %} · {{ np.days_estimated }} day{{ '' if np.days_estimated == 1 else 's' }} not imported yet{% endif %}</div></a>
     {% else %}
     <div class="tile"><div class="k">Payroll this month</div><div class="v">{{ s.payroll.monthToDate|money }}</div><div class="s">Last month {{ s.payroll.previousMonth|money }}</div></div>

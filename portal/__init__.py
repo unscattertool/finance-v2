@@ -1057,7 +1057,7 @@ def create_app(instance_path=None):
                     if p["pay_day"] <= horizon.isoformat():
                         days = (dt.date.fromisoformat(p["pay_day"]) - today).days
                         bills.append({"id": None, "due": p["pay_day"], "name": "Payroll %s – %s" % (_mdy_s(p["start"]), _mdy_s(p["end"])),
-                                      "amount": p["total"], "status": "Due ≤7 days" if days <= 7 else "Upcoming",
+                                      "amount": p["total"], "status": ("Late · not run yet (%d day%s)" % (p["days_late"], "" if p["days_late"] == 1 else "s")) if p.get("late") else "Due ≤7 days" if days <= 7 else "Upcoming",
                                       "source": "Gusto preview" if p.get("gusto") else "Estimate · Time Clock", "kind": "payroll", "payroll": p})
                 bills.sort(key=lambda b: b["due"] or "9999")
                 s["billsDue"] = bills
