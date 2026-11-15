@@ -1108,7 +1108,7 @@ def gusto_previews(db, client):
 INCOME_CATS = ("Sales - Card", "Sales - Cash")
 
 
-def projection(db, client, snap, target, today=None, card_on_the_way=0.0, lookback_days=28, deposit_lag=2, payroll=None):
+def projection(db, client, snap, target, today=None, card_on_the_way=0.0, lookback_days=28, deposit_lag=2, payroll=None, taxes=None):
     """Projected bank balance on `target`: available balance now − checks written but not cleared + card batches not yet
     deposited + estimated sales deposits until then − bills and recurring payments due by then."""
     today = today or dt.date.today()
@@ -1130,8 +1130,16 @@ def projection(db, client, snap, target, today=None, card_on_the_way=0.0, lookba
                 items.append(dict(date=today.isoformat() if p.get("late") else p["pay_day"], name=("NOT RUN YET (was due %s) · " % dt.date.fromisoformat(p["pay_day"]).strftime("%-m/%-d") if p.get("late") else "") + ("Payroll %s–%s (Gusto preview)" if p.get("gusto") else "Payroll %s–%s (est.)") % (dt.date.fromisoformat(p["start"]).strftime("%-m/%-d"),
                                                                                     dt.date.fromisoformat(p["end"]).strftime("%-m/%-d")),
                                   amount=p["total"], kind="Payroll", overdue=bool(p.get("late"))))
+    for t in taxes or []:  # sales / alcohol tax collected, due by the 25th of the next month (overdue: counted today)
+        if t["overdue"] or today.isoformat() <= t["due"] <= target.isoformat():
+            items.append(dict(date=today.isoformat() if t["overdue"] else t["due"], amount=t["amount"], kind="Tax",
+                              name=t["label"] + (" (was due %s)" % dt.date.fromisoformat(t["due"]).strftime("%-m/%-d") if t["overdue"] else ""),
+                              overdue=bool(t["overdue"])))
+    tax_cats = {"Sales Tax Payable", "Alc Sales Tax"} if taxes is not None else set()
     for r in db.execute("SELECT * FROM recurring WHERE client=? AND active=1", (client,)):
         if use_pr and (r["category"] in PAYROLL_PAY_CATS):
+            continue
+        if r["category"] in tax_cats:  # projected from the tax collected instead
             continue
         hits = recurring_hits(r, entries)
         if not hits:
@@ -1176,7 +1184,7 @@ def projection(db, client, snap, target, today=None, card_on_the_way=0.0, lookba
     bill_payees = {(r[0] or "") for r in db.execute("SELECT vendor FROM bill WHERE client=?", (client,))}
     out = sum(-e["amount"] for e in entries if e["amount"] < 0 and e["date"] >= since and e["date"] <= today.isoformat()
               and (e["payee"] or "") not in rec_payees and (e["payee"] or "") not in bill_payees
-              and not (use_pr and e["category"] in PAYROLL_PAY_CATS))
+              and not (use_pr and e["category"] in PAYROLL_PAY_CATS) and e["category"] not in tax_cats)
     other_per_day = out / lookback_days
     other = round(other_per_day * days_ahead, 2)
     projected = round(start + not_cleared + card_on_the_way + income - bills - other, 2)

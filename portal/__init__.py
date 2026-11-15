@@ -1062,9 +1062,28 @@ def create_app(instance_path=None):
                 bills.sort(key=lambda b: b["due"] or "9999")
                 s["billsDue"] = bills
                 s["billsDueTotal"] = round(sum(b["amount"] for b in bills), 2)
+            taxes = []
+            try:  # sales tax + alcohol tax collected last month, due by the 25th
+                from . import salestax as STX
+                taxes = STX.tax_due(db(), slug)
+            except Exception as e:  # noqa: BLE001
+                app.logger.warning("tax due failed for %s: %s", slug, e)
+            if taxes and s.get("billsDue") is not None:
+                s = dict(s)
+                today = dt.date.today()
+                bills = list(s["billsDue"])
+                for t in taxes:
+                    if t["due"] <= horizon.isoformat() or t["overdue"]:
+                        days = (dt.date.fromisoformat(t["due"]) - today).days
+                        bills.append({"id": None, "due": t["due"], "name": t["label"] + (" (rest)" if t["partial"] else ""), "amount": t["amount"],
+                                      "status": "Overdue" if t["overdue"] else "Due ≤7 days" if days <= 7 else "Upcoming",
+                                      "source": "Tax collected in sales deposits", "kind": "tax"})
+                bills.sort(key=lambda b: b["due"] or "9999")
+                s["billsDue"] = bills
+                s["billsDueTotal"] = round(sum(b["amount"] for b in bills), 2)
             try:
                 proj = B.projection(db(), slug, s, dt.date.fromisoformat(target), card_on_the_way=(card_pending or {}).get("total", 0.0),
-                                    payroll=payroll)
+                                    payroll=payroll, taxes=taxes)
             except Exception as e:
                 app.logger.warning("projection failed for %s: %s", slug, e)
         billdocs = {}

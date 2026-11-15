@@ -264,7 +264,7 @@ def _paid_by_month(db, client, since):
 def tax_report(db, client, shifts_path, a, b):
     """Sales tax report for a filing period [a, b] (ISO dates): per day and per month — gross receipts, net sales, sales
     tax and mixed beverage (liquor) tax collected, which source each day came from, days with sales but no tax figures,
-    and Sales Tax Remitted payments in the month after each month (Oklahoma tax is due the month after)."""
+    and Sales Tax Remitted payments in the month after each month (due by the 25th of the month after)."""
     ensure(db)
     day, liquor, sh, lt, taxes, pos_liq, alcohol, alc_net = _tax_sources(db, client, shifts_path, a, b)
     lic = license_from(db, client)
@@ -301,7 +301,7 @@ def tax_report(db, client, shifts_path, a, b):
         nxt = (first.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
         for f in ("gross", "net", "tax", "liquor", "mixed", "sales_tax", "taxable_net"):
             m[f] = round(m[f], 2)
-        m.update(label=first.strftime("%B %Y"), due=nxt.replace(day=20).isoformat(), paid_next=round(paid.get(nxt.isoformat()[:7], 0.0), 2),
+        m.update(label=first.strftime("%B %Y"), due=nxt.replace(day=25).isoformat(), paid_next=round(paid.get(nxt.isoformat()[:7], 0.0), 2),
                  rate=round(m["sales_tax"] / m["taxable_net"] * 100, 2) if m["taxable_net"] > 0 else None)
         m["owed"] = round(m["tax"] - m["paid_next"], 2)
         out_m.append(m)

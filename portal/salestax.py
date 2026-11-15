@@ -322,6 +322,50 @@ def balances(db, client):
     return out
 
 
+TAX_DUE_DAY = 25   # owner 11/15: last month's sales tax and alcohol (mixed beverage) tax are due by the 25th
+
+
+def _month_after(d):
+    return (d.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
+
+
+def tax_due(db, client, today=None, due_day=TAX_DUE_DAY):
+    """Sales tax and alcohol tax payments coming up, from the tax split out of each sales deposit (collected) less what
+    has been paid. Tax collected in a month is due on the `due_day` of the next month. Returns a list of
+    dict(cat, label, month, due, amount, overdue) — older unpaid tax first (overdue), then this month's due date."""
+    today = today or dt.date.today()
+    this_m = today.replace(day=1)
+    from .salesum import license_from
+    lic = license_from(db, client)
+    out = []
+    for cat in TAX_CATS:
+        coll = {r[0]: r[1] or 0.0 for r in db.execute(
+            """SELECT substr(e.date,1,7), sum(s.amount) FROM entry_split s JOIN entry e ON e.id=s.entry_id
+               WHERE s.client=? AND s.category=? AND s.source=? AND e.status!='void' GROUP BY 1""", (client, cat, SOURCE))}
+        paid = balances(db, client)[cat]["paid"]
+        # payments go to the oldest months first
+        left = paid
+        for m in sorted(coll):
+            amt = round(coll[m], 2)
+            use = min(max(left, 0.0), amt)
+            left -= use
+            owe = round(amt - use, 2)
+            if owe < 0.01:
+                continue
+            first = dt.date.fromisoformat(m + "-01")
+            if first >= this_m and _month_after(first).replace(day=due_day) > today + dt.timedelta(days=45):
+                continue
+            due = _month_after(first).replace(day=due_day)
+            if cat == ALC_CAT:
+                label = ("Alcohol tax — %s (to the hotel)" if not lic or m + "-01" < lic else "Mixed beverage tax — %s") % first.strftime("%B %Y")
+            else:
+                label = "Sales tax — %s" % first.strftime("%B %Y")
+            out.append(dict(cat=cat, label=label, month=m, due=due.isoformat(), amount=owe, overdue=due < today,
+                            partial=use > 0, collected=amt))
+    out.sort(key=lambda x: (x["due"], x["cat"]))
+    return out
+
+
 # ------------------------------------------------------------------ what each sales deposit has to cover (display only)
 COGS_CATS = {"food": "Food COGS", "bev": "Beverage COGS"}
 COGS_DAYS = 14

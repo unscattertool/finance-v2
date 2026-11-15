@@ -203,6 +203,8 @@
               <button type="submit" class="primary-sm">Use Gusto's numbers</button>
             </form>
           </details>
+          {% elif b.kind == 'tax' %}
+          <a class="btn" href="{{ url_for('report', slug=c.slug, kind='sales-tax') }}">Sales tax report</a>
           {% else %}
           <details class="inline"><summary class="btn">{{ 'Pay / edit' if b.kind == 'bill' else 'Edit' }}</summary>
           {% if b.kind == 'bill' %}
