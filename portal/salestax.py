@@ -338,13 +338,29 @@ def tax_due(db, client, today=None, due_day=TAX_DUE_DAY):
     from .salesum import license_from
     lic = license_from(db, client)
     out = []
+    # a month whose filed return was paid is settled (the return is the amount owed, even when the POS shows a little
+    # more or less); payments that match no return pay the oldest open months first
+    settled, matched_paid = {c: set() for c in TAX_CATS}, {c: 0.0 for c in TAX_CATS}
+    try:
+        db.execute(RETURN_SCHEMA)
+        hit, pays = match_payments(db, client)
+        for p in pays:
+            r = hit.get(p["id"])
+            if r:
+                c = STATE_CAT if r["kind"] == "sales" else ALC_CAT
+                settled[c].add(r["period_end"][:7])
+                matched_paid[c] += min(-p["amount"], r["tax_due"])
+    except Exception:  # noqa: BLE001 — no returns imported
+        pass
+    bal = balances(db, client)
     for cat in TAX_CATS:
         coll = {r[0]: r[1] or 0.0 for r in db.execute(
             """SELECT substr(e.date,1,7), sum(s.amount) FROM entry_split s JOIN entry e ON e.id=s.entry_id
                WHERE s.client=? AND s.category=? AND s.source=? AND e.status!='void' GROUP BY 1""", (client, cat, SOURCE))}
-        paid = balances(db, client)[cat]["paid"]
-        # payments go to the oldest months first
-        left = paid
+        for m in settled[cat]:
+            coll.pop(m, None)
+        # payments go to the oldest open months first
+        left = round(bal[cat]["paid"] - matched_paid[cat], 2)
         for m in sorted(coll):
             amt = round(coll[m], 2)
             use = min(max(left, 0.0), amt)
