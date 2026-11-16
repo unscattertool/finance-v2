@@ -9,6 +9,7 @@ import datetime as dt
 import hmac
 import re
 import json
+import zlib
 import os
 import secrets
 import tempfile
@@ -857,6 +858,45 @@ def create_app(instance_path=None):
         if f.get("next") == "check":
             return redirect(url_for("recurring_check", slug=slug))
         return redirect(url_for("client_page", slug=slug) + "#bills")
+
+    # ------------------------------------------------------------------ 1099s
+    @app.route("/c/<slug>/1099", methods=["GET", "POST"])
+    @login_required
+    def ten99_page(slug):
+        c = client_or_404(slug)
+        if not c.get("books"):
+            abort(404)
+        from . import ten99 as N
+        N.ensure(db())
+        try:
+            year = int(request.args.get("year") or request.form.get("year") or (dt.date.today().year))
+        except ValueError:
+            year = dt.date.today().year
+        if request.method == "POST":
+            edit_required(slug)
+            f = request.form
+            payee = _txt(f.get("payee"), 200)
+            if not payee:
+                abort(400)
+            ent = f.get("entity") if f.get("entity") in dict(N.ENTITIES) else None
+            st = f.get("status") if f.get("status") in ("", "filed", "not_needed") else None
+            form = f.get("form") if f.get("form") in ("1099-NEC", "1099-MISC") else None
+            N.save(db(), slug, payee, g.user["email"], entity=ent, w9=f.get("w9") == "1", status=st, notes=_txt(f.get("notes"), 300), form=form)
+            log("1099_save", user=g.user["email"], client=slug, payee=payee)
+            flash("Saved %s." % payee, "ok")
+            return redirect(url_for("ten99_page", slug=slug, year=year) + "#p-" + str(zlib.crc32(payee.encode())))
+        r = N.report(db(), slug, year)
+        if request.args.get("format") == "csv":
+            rows = [[p["payee"], p["form"], p["reportable"], p["nec"], p["misc"], dict(N.ENTITIES).get(p["entity"], p["entity"]),
+                     "yes" if p["w9"] else "no", p["status"] or "", p["notes"]] for p in r["needs"]]
+            return _csv("%s-1099-%d" % (slug, year), ["Payee", "Form", "Reportable", "Services (NEC)", "Rent (MISC)", "Business type",
+                                                   "W-9 on file", "Status", "Notes"], rows)
+        detail = None
+        if request.args.get("payee"):
+            detail = dict(payee=request.args["payee"], rows=N.payments(db(), slug, request.args["payee"], year))
+        years = [y for (y,) in db().execute("SELECT DISTINCT CAST(substr(date,1,4) AS INTEGER) FROM entry WHERE client=? ORDER BY 1 DESC", (slug,))]
+        return render_template("ten99.html", c=c, r=r, entities=N.ENTITIES, detail=detail, years=years or [year],
+                               editor=bool(c.get("books")) and can_edit(slug), pid=lambda n: zlib.crc32(n.encode()))
 
     @app.route("/c/<slug>/recurring-check", methods=["GET", "POST"])
     @login_required

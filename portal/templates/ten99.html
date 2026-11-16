@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} · 1099s {{ r.year }}{% endblock %}
+{% block heading %}{{ c.name }} · 1099s for {{ r.year }}{% endblock %}
+{% block sub %}<p>Who was paid {{ r.threshold|money }} or more for services or rent in {{ r.year }} by check, ACH or bank transfer · 1099s due to them and the IRS by {{ r.due|mdy }}</p>{% endblock %}
+{% block body %}
+<p class="no-print"><a href="{{ url_for('client_page', slug=c.slug) }}">← Back</a>
+  · Year {% for y in years %}<a href="{{ url_for('ten99_page', slug=c.slug, year=y) }}" class="{{ 'btn on' if y == r.year else 'btn' }}">{{ y }}</a> {% endfor %}
+  · <a href="{{ url_for('ten99_page', slug=c.slug, year=r.year, format='csv') }}">Download the list (CSV)</a></p>
+
+<div class="tiles">
+  <div class="tile"><div class="k">Need a 1099</div><div class="v">{{ r.needs|length }}</div><div class="s">{{ r.total_reportable|money }} paid · {{ r.filed }} filed</div></div>
+  <div class="tile"><div class="k">W-9 missing</div><div class="v {{ 'neg' if r.missing_w9 }}">{{ r.missing_w9 }}</div><div class="s">ask for a W-9 before you pay them again</div></div>
+  <div class="tile"><div class="k">Check these</div><div class="v {{ 'neg' if r.check }}">{{ r.check|length }}</div><div class="s">over {{ r.threshold|money }} once uncategorized payments count</div></div>
+  <div class="tile"><div class="k">Under {{ r.threshold|money }}</div><div class="v">{{ r.under|length }}</div><div class="s">service / rent payees, no 1099 yet{% if r.partial_year %} — watch these as the year goes on{% endif %}</div></div>
+</div>
+{% if r.partial_year %}<div class="warn">{{ r.year }} isn't over yet: totals are payments so far. Anyone near {{ r.threshold|money }} may cross it by December 31.</div>{% endif %}
+
+{% macro row(p, show_why=True) %}
+<tr id="p-{{ pid(p.payee) }}">
+  <td><a href="{{ url_for('ten99_page', slug=c.slug, year=r.year, payee=p.payee) }}#detail">{{ p.payee }}</a>
+    <div class="small muted">{% for cat, v in p.cats[:3] %}{{ cat }} {{ v|money }}{{ ' · ' if not loop.last }}{% endfor %}</div></td>
+  <td class="n"><b>{{ p.reportable|money }}</b>
+    {% if p.unsure %}<div class="small muted">+ {{ p.unsure|money }} to categorize</div>{% endif %}
+    {% if p.card %}<div class="small muted" title="Paid by card or a payment app: the card company / app reports these on a 1099-K">+ {{ p.card|money }} by card</div>{% endif %}</td>
+  <td class="small">{{ p.form }}</td>
+  <td class="small">{{ dict(entities).get(p.entity) if p.entity else ('looks like a corporation' if p.guess == 'corporation' else 'attorney?' if p.guess == 'attorney' else '—') }}</td>
+  <td>{% if p.w9 %}<span class="pill ok">W-9</span>{% else %}<span class="pill late">no W-9</span>{% endif %}</td>
+  <td style="white-space:normal;max-width:300px">{% if p.status == 'filed' %}<span class="pill ok">filed</span>{% elif p.status == 'not_needed' %}<span class="pill soon">not needed</span>{% endif %}
+    {% if show_why and p.why %}<div class="small muted">{{ p.why|join('; ') if p.why is not string else p.why }}</div>{% endif %}
+    {% if p.notes %}<div class="small">{{ p.notes }}</div>{% endif %}</td>
+  {% if editor %}<td><details class="inline"><summary class="btn">Edit</summary>
+    <form method="post" class="mini" style="display:grid;gap:6px;min-width:260px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="year" value="{{ r.year }}"><input type="hidden" name="payee" value="{{ p.payee }}">
+      <label>Business type (from the W-9) <select name="entity">{% for k, lab in entities %}<option value="{{ k }}" {{ 'selected' if k == p.entity }}>{{ lab }}</option>{% endfor %}</select></label>
+      <label><input type="checkbox" name="w9" value="1" {{ 'checked' if p.w9 }}> W-9 on file</label>
+      <label>Form <select name="form"><option {{ 'selected' if p.form == '1099-NEC' }}>1099-NEC</option><option {{ 'selected' if p.form == '1099-MISC' }}>1099-MISC</option></select></label>
+      <label>Status <select name="status"><option value="">To do</option><option value="filed" {{ 'selected' if p.status == 'filed' }}>Filed</option><option value="not_needed" {{ 'selected' if p.status == 'not_needed' }}>Not needed</option></select></label>
+      <label>Notes <input name="notes" value="{{ p.notes }}" maxlength="300"></label>
+      <button type="submit" class="primary-sm">Save</button></form></details></td>{% endif %}
+</tr>
+{% endmacro %}
+{% set head %}<tr><th>Payee</th><th class="n">Paid in {{ r.year }}</th><th>Form</th><th>Business type</th><th>W-9</th><th>Status</th>{% if editor %}<th></th>{% endif %}</tr>{% endset %}
+
+<details class="card-sec" open>
+  <summary><span>Need a 1099</span><span class="muted">{{ r.needs|length }}</span></summary>
+  {% if r.needs %}<div class="scroll"><table class="fin tight">{{ head }}{% for p in r.needs %}{{ row(p) }}{% endfor %}</table></div>
+  {% else %}<div class="empty">Nobody has been paid {{ r.threshold|money }} or more for services or rent by check or bank payment{{ ' so far' if r.partial_year }}.</div>{% endif %}
+</details>
+
+{% if r.check %}
+<details class="card-sec" open>
+  <summary><span>Check these</span><span class="muted">{{ r.check|length }}</span></summary>
+  <p class="hint" style="padding:0 14px">Under {{ r.threshold|money }} in service or rent categories, but over it once their uncategorized, missing-check or Other Expense payments are added. Categorize those payments and they'll move to the right list.</p>
+  <div class="scroll"><table class="fin tight">{{ head }}{% for p in r.check %}{{ row(p) }}{% endfor %}</table></div>
+</details>
+{% endif %}
+
+<details class="card-sec">
+  <summary><span>Under {{ r.threshold|money }}</span><span class="muted">{{ r.under|length }}</span></summary>
+  <div class="scroll"><table class="fin tight">{{ head }}{% for p in r.under %}{{ row(p, False) }}{% endfor %}</table></div>
+</details>
+
+<details class="card-sec">
+  <summary><span>Not reportable</span><span class="muted">{{ r.no|length }} payees</span></summary>
+  <p class="hint" style="padding:0 14px">Goods and supplies, utilities, software, insurance, bank and card fees, payroll, taxes, loans, transfers and owner draws; payees marked as a corporation (other than attorneys), government or employee; and payments by card or payment app (reported on a 1099-K).</p>
+  <div class="scroll"><table class="fin tight"><tr><th>Payee</th><th class="n">Paid</th><th>Mostly</th><th>Why not</th></tr>
+  {% for p in r.no[:200] %}<tr><td><a href="{{ url_for('ten99_page', slug=c.slug, year=r.year, payee=p.payee) }}#detail">{{ p.payee }}</a></td><td class="n">{{ p.total|money }}</td>
+    <td class="small">{{ p.cats[0][0] if p.cats }}</td><td class="small muted">{{ p.why if p.why is string else ('paid by card / app' if p.card and not p.other else 'not a service or rent category') }}</td></tr>{% endfor %}
+  </table></div>
+</details>
+
+{% if detail %}
+<details class="card-sec" open id="detail">
+  <summary><span>Payments to {{ detail.payee }} in {{ r.year }}</span><span class="muted">{{ detail.rows|length }}</span></summary>
+  <div class="scroll"><table class="fin tight"><tr><th>Date</th><th>Description</th><th>Category</th><th class="n">Paid</th><th>Counts as</th></tr>
+  {% for e in detail.rows %}<tr><td>{{ e.date|mdy }}</td><td class="small">{% if e.check_no %}#{{ e.check_no }} · {% endif %}<a href="{{ url_for('entry_edit', slug=c.slug, eid=e.id) }}">{{ e.description }}</a></td>
+    <td class="small">{{ e.category }}</td><td class="n">{{ e.paid|money }}</td><td class="small">{{ e.counts }}</td></tr>{% endfor %}
+  </table></div>
+</details>
+{% endif %}
+
+<p class="hint">How this is worked out: payments out of the bank register in {{ r.year }}, by payee. Services (Professional Services, Repairs &amp; Maintenance, Linen &amp; Laundry, Marketing &amp; Signage, contract labor) go on a 1099-NEC; rent on a 1099-MISC. The threshold is {{ r.threshold|money }} ({{ '$600 before 2026; $2,000 for payments from 2026 on' }}). Corporations don't get one unless they're attorneys. Get each payee's W-9 for their business type, legal name, address and tax ID — the tax ID goes on the 1099 itself and isn't kept here. Not tax advice; your accountant has the last word.</p>
+{% endblock %}
