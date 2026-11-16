@@ -229,9 +229,11 @@
             {% for d in p.days %}<tr><td>{{ d.date|mdy }}</td><td class="n">{{ d.batch|money }}</td><td class="n">{{ d.shifts|money }}</td><td class="n {{ 'neg-soft' if d.diff|abs >= 0.01 }}">{{ d.diff|money if d.diff|abs >= 0.01 else '' }}</td></tr>{% endfor %}
           </table>
           <table class="mini">
-            <tr><th>Employee</th><th class="n">Card tips (Linga)</th><th class="n">Tip-outs / credits</th><th class="n">Earned</th><th class="n">Gusto paid</th><th class="n">Owed</th></tr>
+            <tr><th>Employee</th><th class="n">Card tips (Linga)</th><th class="n">Tip-outs / credits</th><th class="n">Earned</th><th class="n">Gusto paid</th><th class="n">Owed</th><th class="n" title="Cash expected on their closeouts but not turned in">Cash not turned in</th><th class="n">Tips to pay</th></tr>
             {% for e in p.employees %}<tr><td>{{ e.name }}</td><td class="n">{{ e.batch|money }}</td><td class="n">{{ e.adj|money if e.adj else '' }}</td><td class="n">{{ e.earned|money }}</td><td class="n">{{ e.paid|money }}</td>
-              {% if p.paper %}<td class="n muted small" title="Paper-records period: Gusto is the record, so this isn't counted as owed">{{ ('(' ~ (e.gap|money) ~ ')') if e.gap|abs >= 0.01 else '' }}</td>{% else %}<td class="n {{ 'neg' if e.owed >= 0.01 else ('pos-soft' if e.owed <= -0.01 else '') }}">{{ e.owed|money if e.owed|abs >= 0.01 else '' }}</td>{% endif %}</tr>{% endfor %}
+              {% if p.paper %}<td class="n muted small" title="Paper-records period: Gusto is the record, so this isn't counted as owed">{{ ('(' ~ (e.gap|money) ~ ')') if e.gap|abs >= 0.01 else '' }}</td>{% else %}<td class="n {{ 'neg' if e.owed >= 0.01 else ('pos-soft' if e.owed <= -0.01 else '') }}">{{ e.owed|money if e.owed|abs >= 0.01 else '' }}</td>{% endif %}
+              <td class="n {{ 'neg' if e.cash_short }}" title="{% for d, v in e.cash_short_days %}{{ d|mdy }}: {{ v|money }}&#10;{% endfor %}">{{ ('−' ~ (e.cash_short|money)) if e.cash_short else '' }}</td>
+              <td class="n">{{ e.to_pay|money if e.cash_short else '' }}</td></tr>{% endfor %}
           </table>
           {% if p.unassigned %}<p class="hint">Not matched to an employee: {% for k, v in p.unassigned.items() %}{{ k }} {{ v|money }}{{ '; ' if not loop.last }}{% endfor %} — fix under Name matching.</p>{% endif %}
           {% if p.unsourced_credits %}<p class="hint">Shifts tip credits without a source shift: {{ p.unsourced_credits|money }} (added to the person, not taken from anyone).</p>{% endif %}

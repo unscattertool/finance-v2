@@ -74,7 +74,8 @@ def _shifts(path, a, b):
     out = dict(owner_tips=collections.defaultdict(float), outs_given=collections.defaultdict(float),
                outs_recv=collections.defaultdict(float), credit_in=collections.defaultdict(float),
                credit_out=collections.defaultdict(float), credit_unsourced=0.0, bar_staff=collections.defaultdict(set),
-               day_tips=collections.defaultdict(float), names=set(), moves=[], events=[])
+               day_tips=collections.defaultdict(float), names=set(), moves=[], events=[],
+               cash_short=collections.defaultdict(float), cash_short_days=collections.defaultdict(list))
     if not path:
         return out
     try:
@@ -82,7 +83,9 @@ def _shifts(path, a, b):
         s.row_factory = sqlite3.Row
         staff = {r["id"]: r for r in s.execute("SELECT id, name, team_group FROM staff")}
         shifts = {r["id"]: dict(r) for r in s.execute(
-            "SELECT id, staff_id, shift_date, shift_type, cc_tips_cents FROM shifts WHERE shift_date BETWEEN ? AND ?", (a, b))}
+            """SELECT id, staff_id, shift_date, shift_type, cc_tips_cents, cash_expected_cents, cash_drop_cents,
+                      COALESCE((SELECT SUM(amount_cents) FROM cash_paid_outs p WHERE p.shift_id = shifts.id), 0) AS paid_out_cents
+               FROM shifts WHERE shift_date BETWEEN ? AND ?""", (a, b))}
         members = collections.defaultdict(list)
         for r in s.execute("SELECT shift_id, staff_id FROM shift_members"):
             members[r["shift_id"]].append(r["staff_id"])
@@ -99,6 +102,13 @@ def _shifts(path, a, b):
     for sh in shifts.values():
         who = nm(sh["staff_id"])
         out["names"].add(who)
+        # cash the closeout says the person should have turned in (cash sales − cash paid out) but didn't
+        exp = (sh.get("cash_expected_cents") or 0) / 100
+        if exp:
+            short = exp - (sh.get("cash_drop_cents") or 0) / 100 - (sh.get("paid_out_cents") or 0) / 100
+            out["cash_short"][who] += short
+            if abs(short) >= 0.005:
+                out["cash_short_days"][who].append((sh["shift_date"], round(short, 2)))
         out["owner_tips"][who] += (sh["cc_tips_cents"] or 0) / 100
         out["day_tips"][sh["shift_date"]] += (sh["cc_tips_cents"] or 0) / 100
         if sh["shift_type"] == "bar":
@@ -353,14 +363,25 @@ def check(db, client, shifts_path, since="2026-04-27", paper_until=PAPER_UNTIL, 
         complete = bool(last_batch and last_batch >= b)
         paper = bool(paper_until and b <= paper_until)
         shifts_ok = not paper and complete and abs(tb - ts_) <= SHIFTS_TOLERANCE  # Shifts has (nearly) every closeout and tip-out
+        # cash expected on someone's closeouts but not turned in comes off the tips they're paid (net for the period,
+        # only when short overall)
+        short = collections.defaultdict(float)
+        short_days = collections.defaultdict(list)
+        for n, v in sh["cash_short"].items():
+            e_ = emp("shifts", n)
+            if e_ and e_ not in (BAR, NONE, OWNER):
+                short[e_] += v
+                short_days[e_] += sh["cash_short_days"].get(n, [])
         rows = []
-        for who in sorted(set(earned) | set(adj) | set(paid)):
+        for who in sorted(set(earned) | set(adj) | set(paid) | {k for k, v in short.items() if v >= 0.005}):
             e = round(earned.get(who, 0) + adj.get(who, 0), 2)
             p = round(paid.get(who, 0), 2)
-            if abs(e) < 0.005 and abs(p) < 0.005:
+            cs = round(max(short.get(who, 0.0), 0.0), 2)
+            if abs(e) < 0.005 and abs(p) < 0.005 and cs < 0.005:
                 continue
             rows.append(dict(name=who, batch=round(earned.get(who, 0), 2), adj=round(adj.get(who, 0), 2), earned=e, paid=p,
-                             owed=0.0 if paper else round(e - p, 2), gap=round(e - p, 2)))
+                             owed=0.0 if paper else round(e - p, 2), gap=round(e - p, 2), cash_short=cs, to_pay=round(e - cs, 2),
+                             cash_short_days=sorted(short_days.get(who, [])) if cs else []))
             if paper:  # paper records went into Gusto: what Gusto paid is what they earned
                 continue
             owed_total[who] += e - p

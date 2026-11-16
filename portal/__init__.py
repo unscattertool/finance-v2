@@ -709,6 +709,8 @@ def create_app(instance_path=None):
         tc = tipcheck.check(db(), slug, c.get("shifts_db"), c.get("tips_since", "2026-04-27"), c.get("paper_until", tipcheck.PAPER_UNTIL),
                             c.get("solo_bar", tipcheck.SOLO_BAR), c.get("tip_managers"), extra_periods=[(p["start"], p["end"]) for p in days]) or {}
         by_period = {(x["start"], x["end"]): {norm(e["name"]): e["earned"] for e in x["employees"]} for x in tc.get("periods", [])}
+        short_by_period = {(x["start"], x["end"]): {norm(e["name"]): (e.get("cash_short") or 0.0, e.get("cash_short_days") or [])
+                                                    for e in x["employees"] if e.get("cash_short")} for x in tc.get("periods", [])}
         detail = {}
         B._pos_wages(db(), slug, c.get("shifts_db"), detail=detail)
         sal = {norm(x["name"]): round(x["annual"] / 26.0, 2) for x in payroll.get("salaries") or []}
@@ -746,11 +748,22 @@ def create_app(instance_path=None):
                 for r in rows.values():
                     r["pay"], r["tips"] = round(r["pay"], 2), round(r["tips"], 2)
                     r["gross"] = round(r["pay"] + r["tips"], 2)
-            people = sorted((r for r in rows.values() if abs(r["gross"]) >= 0.005), key=lambda r: -r["gross"])
+            # cash expected on their closeouts but not turned in comes off the tips to be paid
+            for n, (cs, cdays) in short_by_period.get((p["start"], p["end"]), {}).items():
+                k = n if n in rows else next((k for k in rows if k.split(" ")[0] == n.split(" ")[0]), n)
+                r = rows.setdefault(k, dict(name=n.title(), tips=0.0, pay=0.0, gross=0.0, salaried=False))
+                r["cash_short"] = round(r.get("cash_short", 0.0) + cs, 2)
+                r["cash_short_days"] = r.get("cash_short_days", []) + cdays
+            for r in rows.values():
+                r.setdefault("cash_short", 0.0)
+                r["tips_to_pay"] = round(r["tips"] - r["cash_short"], 2)
+            people = sorted((r for r in rows.values() if abs(r["gross"]) >= 0.005 or r["cash_short"]), key=lambda r: -r["gross"])
             g_ = round(sum(r["gross"] for r in people), 2)
             t_ = round(sum(r["tips"] for r in people), 2)
+            cs_ = round(sum(r["cash_short"] for r in people), 2)
             p["people"] = people
-            p["people_totals"] = dict(gross=g_, tips=t_, pay=round(g_ - t_, 2), share=(t_ / g_) if g_ else None, tips_known=bool(tips))
+            p["people_totals"] = dict(gross=g_, tips=t_, pay=round(g_ - t_, 2), share=(t_ / g_) if g_ else None, tips_known=bool(tips),
+                                      cash_short=cs_, tips_to_pay=round(t_ - cs_, 2))
 
     def _stx(slug):
         """Sales tax split per deposit entry: {entry_id: {state, alc, total, estimated}}."""
