@@ -3,3 +3,7 @@ __pycache__/
 instance/
 .venv/
 instance-local/
+.env
+*.db
+*.db-wal
+*.db-shm
