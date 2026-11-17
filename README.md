@@ -77,6 +77,36 @@ For clients whose books are in Zoho, the Unscatter platform (on Tammy's PC) buil
 
 Published summaries are stored as `instance/platform_<id>.json` (the previous one as `.prev.json`). Pages: Overview, Sales tax, Sales, Unpaid invoices, Cleanup, each with CSV downloads. The daily `sync` skips these clients.
 
+## Clean data from the platform (any client)
+
+The platform is where client data is cleaned. For each client it saves a **clean data package** — customers (business
+entities), locations, contacts, vendors, chart of accounts, products, invoices, payments, expenses, tax jurisdictions,
+sales tax by period, plus the summary above — in the client's OneDrive folder (`Clients/<client>/Data/Platform/`:
+`platform-data.json.gz` and `manifest.json`). Finance uses the platform's copy of each kind of data when the package
+has it and keeps using its own data when it doesn't. It isn't either/or: a books client (WWK) can take platform data
+too, and a client that isn't in the platform at all keeps working as before.
+
+Turn it on with a `"platform"` block on the client in `instance/clients.json`:
+```json
+"crs": {"name": "CRS", "source": "platform", "push_token_env": "PUSH_TOKEN_CRS",
+        "platform": {"onedrive_folder": "Clients/CRS/Data/Platform",
+                     "graph": {"tenant_id": "…", "client_id": "…", "secret_env": "GRAPH_SECRET_UNSCATTER",
+                               "drive_user": "tammy@unscatterllc.com"}}}
+"wwk": {…, "books": true, "platform": {"push_token_env": "PUSH_TOKEN_WWK_PLATFORM", "ignore": ["vendors"]}}
+```
+- `onedrive_folder` (+ `graph`, which defaults to the client's own `graph` block): Finance reads the manifest every
+  day (and with **Check OneDrive now**) and downloads the package only when it changed. Needs `Files.Read.All`.
+- `push_token_env`: the platform's **Save and send to Finance** button also sends the package to
+  `/api/<id>/platform-data`. For `"source": "platform"` clients the old `push_token_env` is used.
+- `use` / `ignore`: limit which datasets Finance takes from the platform (names on the Data sources page).
+
+Admins see **Data sources** (`/c/<id>/data`): for each kind of data, whether it comes from the platform or Finance,
+row counts, and when it arrived. **Customers & vendors** (`/c/<id>/directory`) lists the platform's customers with
+their locations and contacts, and its vendors (CSV download). **Chart of accounts → Bring in the platform's chart**
+imports the platform's accounts (Zoho accounts keep their Zoho mapping). Packages are stored as
+`instance/platform_data_<id>.json.gz` (+ `.prev.json.gz`) with a `.meta.json` beside them. The format is described in
+the platform's `docs/platform-data-package.md`; `tests/sample_platform_data.json` is a package the platform built.
+
 ## Linking from the shifts site
 
 Ask ChatGPT to add a "Finance" link to `https://finance.unscatterllc.com`, or an embedded panel:

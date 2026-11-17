@@ -33,6 +33,8 @@
       <a href="{{ url_for('receipts_page', slug=c.slug) }}">Receipts</a>
       <a href="{{ url_for('accounts_page', slug=c.slug) }}">Chart of accounts</a>
       <a href="{{ url_for('ledger_page', slug=c.slug) }}">Ledger (double entry)</a>
+      {% if platform_on %}<a href="{{ url_for('directory_page', slug=c.slug) }}">Customers &amp; vendors (platform)</a>{% endif %}
+      {% if is_admin %}<a href="{{ url_for('data_sources', slug=c.slug) }}">Data sources</a>{% endif %}
       {% if is_admin %}<a href="{{ url_for('visitors') }}">Visitors &amp; page views</a>{% endif %}
     </div></details>{% endif %}
     {% endif %}

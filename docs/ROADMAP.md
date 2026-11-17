@@ -32,6 +32,13 @@ Finance v2 = the live Finance portal (finance-portal-1112c, deployed 11/12/2026)
    Next: run the check on a current copy of the live database; then make the balance sheet / cash flow type-driven
    (they still name WWK categories) and let journal entries be made directly (step 3 registers).
 
+5. Platform data (11/17/2026) — `portal/platformdata.py`. The platform saves a clean data package per client in OneDrive
+   (`<client>/Data/Platform/platform-data.json.gz` + `manifest.json`) and can push it to `/api/<slug>/platform-data`.
+   Finance uses the platform's copy of each dataset when it has one and its own data otherwise; a `"platform"` block in
+   clients.json turns it on for any client (books clients too). Data sources page, Customers & vendors directory,
+   chart of accounts import from the platform, daily OneDrive pull. Tests: `tests/test_platformdata.py` (uses a package
+   built by the platform's own code). Next: payee → entity matching on the register (step 4), AR from platform invoices.
+
 ## Goal: Finance keeps real books (CRS and later clients)
 
 Foundation (the Unscatter platform) takes in the client's data, cleans it and stores it as related entities:

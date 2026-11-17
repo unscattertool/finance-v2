@@ -18,7 +18,7 @@
 <div class="tiles">
   <div class="tile"><div class="k">Clean accounts</div><div class="v">{{ summ.accounts }}</div><div class="s">{{ summ.active }} active</div></div>
   <div class="tile"><div class="k">Old accounts mapped</div><div class="v">{{ summ.sources - summ.unmapped }} / {{ summ.sources }}</div>
-    <div class="s">{% for k, v in summ.by_source.items() %}{{ {'zoho': 'Zoho', 'category': 'Finance categories', 'bank': 'bank feeds'}.get(k, k) }} {{ v }}{{ ' · ' if not loop.last }}{% endfor %}</div></div>
+    <div class="s">{% for k, v in summ.by_source.items() %}{{ {'zoho': 'Zoho', 'platform': 'Platform', 'category': 'Finance categories', 'bank': 'bank feeds'}.get(k, k) }} {{ v }}{{ ' · ' if not loop.last }}{% endfor %}</div></div>
   <div class="tile"><div class="k">Confirmed by you</div><div class="v">{{ summ.confirmed }}</div><div class="s">the rest are suggestions</div></div>
   <div class="tile"><div class="k">Needs a decision</div><div class="v">{{ iss.type_changes|length + iss.duplicates|length + iss.same_name|length + iss.similar|length + iss.unmapped|length }}</div>
     <div class="s">type changes, duplicates, unmapped</div></div>
@@ -27,6 +27,13 @@
 {% if editor %}
 <details class="card-sec" {{ 'open' if not summ.sources }}>
   <summary><span>Bring in accounts</span><span class="muted">re-importing keeps your mappings</span></summary>
+  {% if platform_accounts %}
+  <form method="post" class="mini" style="padding:10px 14px 0">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="import-platform">
+    <button type="submit" class="primary-sm">Bring in the platform's chart ({{ platform_accounts.count }} accounts)</button>
+    <span class="hint">Cleaned in the Unscatter platform. Accounts that came from Zoho keep their Zoho mapping.</span>
+  </form>
+  {% endif %}
   <form method="post" enctype="multipart/form-data" class="mini" style="padding:10px 14px">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="import-zoho">
     <label>Zoho Books export .zip (brings in the chart and how often each account was used this year), or just its Chart_of_Accounts.csv <input type="file" name="file" accept=".zip,.csv,text/csv,application/zip" required></label>

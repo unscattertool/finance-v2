@@ -29,7 +29,16 @@
     "sales",
     "receivables",
     "cleanup"
-   ]
+   ],
+   "platform": {
+    "onedrive_folder": "Clients/CRS/Data/Platform",
+    "graph": {
+     "tenant_id": "PASTE-DIRECTORY-TENANT-ID",
+     "client_id": "PASTE-APPLICATION-CLIENT-ID",
+     "secret_env": "GRAPH_SECRET_UNSCATTER",
+     "drive_user": "tammy@unscatterllc.com"
+    }
+   }
   }
  }
 }

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} · customers & vendors{% endblock %}
+{% block heading %}{{ c.name }} · customers &amp; vendors{% endblock %}
+{% block sub %}<p>As cleaned in the Unscatter platform{% if m %} · as of {{ m.asOf|longdate }}{% endif %}. Each customer is one business, with its own locations and contacts.</p>{% endblock %}
+{% block body %}
+<nav class="tabs no-print">
+  <a href="{{ url_for('client_page', slug=c.slug) }}">← Dashboard</a>
+  <a href="{{ url_for('directory_page', slug=c.slug, show='customers', q=q or None) }}" class="{{ 'on' if show == 'customers' }}">Customers ({{ n_customers }})</a>
+  <a href="{{ url_for('directory_page', slug=c.slug, show='vendors', q=q or None) }}" class="{{ 'on' if show == 'vendors' }}">Vendors ({{ n_vendors }})</a>
+</nav>
+<form method="get" class="mini no-print" style="margin:8px 0">
+  <input type="hidden" name="show" value="{{ show }}">
+  <input name="q" value="{{ q }}" placeholder="Search name, location, city, contact" maxlength="80">
+  <button type="submit" class="btn">Search</button>
+  <a class="small" href="{{ url_for('directory_page', slug=c.slug, show=show, q=q or None, format='csv') }}">Download CSV</a>
+</form>
+
+{% if show == 'customers' %}
+{% if not customers %}<p class="muted">No customers{{ ' match' if q }}.</p>{% endif %}
+<table>
+  <thead><tr><th>Customer</th><th>Locations</th><th>Contacts</th></tr></thead>
+  <tbody>
+  {% for e in customers %}
+  <tr><td><b>{{ e.name }}</b>{% if not e.get('active', True) %} <span class="pill soon">inactive</span>{% endif %}
+      <div class="small muted">{% if e.group %}{{ e.group }}{% endif %}{% if e.accountNumber %}{{ ' · ' if e.group }}#{{ e.accountNumber }}{% endif %}{% if e.taxExempt %} · tax exempt{% endif %}</div></td>
+    <td class="small" style="white-space:normal">{% for l in e.locations[:8] %}<div>{{ l.name }}{% if l.city %} — {{ l.city }}{% if l.state %}, {{ l.state }}{% endif %}{% endif %}{% if l.taxJurisdiction %} <span class="muted">· {{ l.taxJurisdiction }}</span>{% endif %}</div>{% endfor %}
+      {% if e.locations|length > 8 %}<div class="muted">and {{ e.locations|length - 8 }} more</div>{% endif %}</td>
+    <td class="small" style="white-space:normal">{% for p in e.contacts[:4] %}<div>{{ p.name }}{% if p.role %} <span class="muted">({{ p.role }})</span>{% endif %}{% if p.email %} · {{ p.email }}{% endif %}</div>{% endfor %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if n_customers > customers|length %}<p class="hint">Showing the first {{ customers|length }}; search or download the CSV for the rest.</p>{% endif %}
+{% else %}
+{% if not vendors %}<p class="muted">No vendors{{ ' match' if q }}.</p>{% endif %}
+<table>
+  <thead><tr><th>Vendor</th><th>Contact</th><th>Terms</th></tr></thead>
+  <tbody>
+  {% for v in vendors %}
+  <tr><td><b>{{ v.name }}</b>{% if not v.get('active', True) %} <span class="pill soon">inactive</span>{% endif %}{% if v.company and v.company != v.name %}<div class="small muted">{{ v.company }}</div>{% endif %}</td>
+    <td class="small">{{ v.email or '' }}{% if v.email and v.phone %} · {% endif %}{{ v.phone or '' }}</td>
+    <td class="small">{{ v.terms or '' }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if n_vendors > vendors|length %}<p class="hint">Showing the first {{ vendors|length }}; search or download the CSV for the rest.</p>{% endif %}
+{% endif %}
+{% endblock %}

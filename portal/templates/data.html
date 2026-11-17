@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} · data sources{% endblock %}
+{% block heading %}{{ c.name }} · data sources{% endblock %}
+{% block sub %}<p>Where Finance gets each kind of data for this client: the clean copy from the Unscatter platform when it has one, otherwise Finance's own.</p>{% endblock %}
+{% block body %}
+<p class="no-print"><a href="{{ url_for('client_page', slug=c.slug) }}">← Back</a></p>
+
+{% if not on %}
+<div class="warn">This client doesn't take data from the platform. Finance uses its own data for everything.
+  To turn it on, add a <code>"platform"</code> block to this client in <code>instance/clients.json</code> (see the README), then send the data from the platform's Finance Portal screen.</div>
+{% else %}
+<div class="tiles">
+  <div class="tile"><div class="k">Platform data</div>
+    <div class="v">{{ m.asOf|longdate if m else 'none yet' }}</div>
+    <div class="s">{% if m %}as of · received {{ m.receivedAt|when }} {{ 'from OneDrive' if m.via == 'onedrive' else 'sent by the platform' }}{% else %}nothing received yet{% endif %}</div></div>
+  <div class="tile"><div class="k">OneDrive folder</div>
+    <div class="v small" style="font-size:15px">{{ folder or 'not set' }}</div>
+    <div class="s">{{ 'checked every day by the sync job' if folder else 'the platform pushes instead' }}</div></div>
+  <div class="tile"><div class="k">Push token</div>
+    <div class="v small" style="font-size:15px">{{ token_env or 'not set' }}</div>
+    <div class="s">environment variable the platform's token must match</div></div>
+  {% if m and m.historySince %}<div class="tile"><div class="k">History included</div><div class="v">{{ m.historySince|longdate }}</div><div class="s">invoices, payments, expenses from this date on (plus anything still unpaid)</div></div>{% endif %}
+</div>
+{% if folder %}
+<form method="post" class="mini no-print" style="margin:8px 0 14px">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit" class="primary-sm">Check OneDrive now</button>
+  <label class="check small"><input type="checkbox" name="force" value="1"> load it again even if nothing changed</label>
+</form>
+{% endif %}
+{% endif %}
+
+<table>
+  <thead><tr><th>Data</th><th>Comes from</th><th class="n">Rows</th><th>When the platform doesn't have it</th></tr></thead>
+  <tbody>
+  {% for name, label, src, n, fallback in rows %}
+  <tr><td>{{ label }}</td>
+    <td>{% if src == 'platform' %}<span class="pill ok">Platform</span>{% elif src == 'off' %}<span class="pill soon">Finance (platform copy turned off)</span>{% elif src == 'finance' %}<span class="pill soon">Finance</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="n">{{ '{:,}'.format(n) if n else '' }}</td>
+    <td class="small muted">{{ fallback or 'not used yet' }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if on and m and m.reports %}<p class="hint">The summary pages ({{ m.reports|join(', ')|replace('_', ' ') }}) come from the same package.</p>{% endif %}
+{% endblock %}

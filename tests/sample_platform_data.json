@@ -1,0 +1,790 @@
+{
+ "kind": "unscatter-platform-data",
+ "version": 1,
+ "generator": "unscatter-platform",
+ "client": {
+  "platformId": "b4287e4c-5451-4be3-8724-412e787236bc",
+  "name": "CRS",
+  "code": null,
+  "folder": null,
+  "zohoOrganizationId": null
+ },
+ "asOf": "2026-10-28",
+ "generatedAt": "2026-10-28T20:00:00+00:00",
+ "historySince": "2024-10-27",
+ "datasets": {
+  "groups": {
+   "count": 1,
+   "updatedAt": "2026-11-17T18:25:54",
+   "rows": [
+    {
+     "id": "4c65f8e2-c9b4-4130-9869-c7d3ba9d4cde",
+     "name": "Grocery Group",
+     "code": null,
+     "source": null
+    }
+   ]
+  },
+  "entities": {
+   "count": 1,
+   "updatedAt": "2026-11-17T18:25:54",
+   "rows": [
+    {
+     "id": "c8b57cf7-4330-4992-9662-1124ce4e910c",
+     "name": "Acme Foods",
+     "displayName": null,
+     "sourceName": null,
+     "groupId": "4c65f8e2-c9b4-4130-9869-c7d3ba9d4cde",
+     "parentId": null,
+     "accountNumber": null,
+     "type": null,
+     "active": true,
+     "taxExempt": null,
+     "taxExemptionNumber": null,
+     "billingLocationId": null,
+     "shippingLocationId": null,
+     "primaryContactId": null,
+     "email": null,
+     "source": null
+    }
+   ]
+  },
+  "locations": {
+   "count": 1,
+   "updatedAt": "2026-11-17T18:25:54",
+   "rows": [
+    {
+     "id": "d092734b-5ec0-4b2f-bb1a-49161f94a782",
+     "name": "Store #12 Denver",
+     "number": null,
+     "code": null,
+     "type": null,
+     "entityId": null,
+     "billingAccountId": null,
+     "address1": null,
+     "address2": null,
+     "city": null,
+     "state": null,
+     "zip": null,
+     "county": null,
+     "addressVerified": false,
+     "taxJurisdiction": null,
+     "taxCode": null,
+     "taxRate": null,
+     "status": null,
+     "source": null
+    }
+   ]
+  },
+  "contacts": {
+   "count": 1,
+   "updatedAt": "2026-11-17T18:25:54",
+   "rows": [
+    {
+     "id": "4ade88c8-3f2a-4a73-96b8-4cc50ba44960",
+     "name": "Pat Buyer",
+     "firstName": "Pat",
+     "lastName": "Buyer",
+     "title": null,
+     "email": "pat@acme.example",
+     "phone": null,
+     "mobile": null,
+     "kind": null,
+     "active": true,
+     "source": null
+    }
+   ]
+  },
+  "contactLinks": {
+   "count": 1,
+   "updatedAt": "2026-11-17T18:25:54",
+   "rows": [
+    {
+     "id": "2d5e778c-c330-4380-aaf7-53a7969811b2",
+     "contactId": "4ade88c8-3f2a-4a73-96b8-4cc50ba44960",
+     "entityType": "business_entity",
+     "entityId": "c8b57cf7-4330-4992-9662-1124ce4e910c",
+     "role": "AP",
+     "primary": true
+    }
+   ]
+  },
+  "vendors": {
+   "count": 1,
+   "updatedAt": "2026-11-17T18:25:54",
+   "rows": [
+    {
+     "id": "d6d2551e-7d54-4268-ad5d-c495861e9df3",
+     "name": "Paper Co",
+     "company": null,
+     "email": null,
+     "phone": null,
+     "active": true,
+     "terms": null,
+     "payablesAccount": null,
+     "source": null
+    }
+   ]
+  },
+  "accounts": {
+   "count": 5,
+   "updatedAt": "2026-11-17T18:25:54",
+   "rows": [
+    {
+     "id": "d8debb34-87a9-4995-ad90-4826d1cecb7b",
+     "name": "Office Supplies",
+     "code": "6100",
+     "type": "Expense",
+     "parentId": null,
+     "parentName": null,
+     "active": true,
+     "source": null
+    },
+    {
+     "id": "6af3ae25-8f04-4ffe-81cd-7ebc1b735b05",
+     "name": "Office Supply",
+     "code": "6101",
+     "type": "Expense",
+     "parentId": null,
+     "parentName": null,
+     "active": true,
+     "source": null
+    },
+    {
+     "id": "a5bbda2a-076b-4467-9a1b-b299cffe92f7",
+     "name": "Sales",
+     "code": "4000",
+     "type": "Income",
+     "parentId": null,
+     "parentName": null,
+     "active": true,
+     "source": null
+    },
+    {
+     "id": "6e777ed5-592e-4aac-8906-30a4e9cc8e89",
+     "name": "Sales",
+     "code": "4000",
+     "type": "Income",
+     "parentId": null,
+     "parentName": null,
+     "active": true,
+     "source": null
+    },
+    {
+     "id": "7b3b347b-81da-4f96-bf31-dfc3ef514bbe",
+     "name": "Travel",
+     "code": null,
+     "type": "Expense",
+     "parentId": null,
+     "parentName": null,
+     "active": true,
+     "source": null
+    }
+   ]
+  },
+  "products": {
+   "count": 1,
+   "updatedAt": "2026-11-17T18:25:54",
+   "rows": [
+    {
+     "id": "9c30fd24-b291-42f9-854c-73dfc8212a84",
+     "name": "Widget A",
+     "sku": "WA",
+     "price": null,
+     "source": null
+    }
+   ]
+  },
+  "invoices": {
+   "count": 4,
+   "updatedAt": "2026-11-17T18:25:54",
+   "rows": [
+    {
+     "id": "099e1f04-27e2-4382-bd3e-b5bfc94e0ba7",
+     "number": "INV-2",
+     "date": "2026-08-01",
+     "due": "2026-08-31",
+     "status": "sent",
+     "entityId": "c8b57cf7-4330-4992-9662-1124ce4e910c",
+     "contactId": null,
+     "billingLocationId": null,
+     "locationId": "d092734b-5ec0-4b2f-bb1a-49161f94a782",
+     "po": null,
+     "salesOrder": null,
+     "subtotal": null,
+     "discount": null,
+     "shipping": null,
+     "tax": 40.0,
+     "total": 540.0,
+     "paid": null,
+     "balance": 540.0,
+     "lines": [
+      {
+       "item": "Gadget B",
+       "sku": null,
+       "productId": null,
+       "description": null,
+       "qty": 5.0,
+       "price": null,
+       "amount": 500.0,
+       "tax": null
+      }
+     ],
+     "source": null
+    },
+    {
+     "id": "f0234ab7-7c7b-4eed-8b04-7d6812c78e80",
+     "number": "INV-1",
+     "date": "2026-09-05",
+     "due": "2026-10-05",
+     "status": "paid",
+     "entityId": "c8b57cf7-4330-4992-9662-1124ce4e910c",
+     "contactId": null,
+     "billingLocationId": null,
+     "locationId": "d092734b-5ec0-4b2f-bb1a-49161f94a782",
+     "po": null,
+     "salesOrder": null,
+     "subtotal": null,
+     "discount": null,
+     "shipping": null,
+     "tax": 80.0,
+     "total": 1080.0,
+     "paid": null,
+     "balance": 0.0,
+     "lines": [],
+     "source": null
+    },
+    {
+     "id": "6f83b154-8479-4cf5-a6a0-744451bf1b83",
+     "number": "INV-V",
+     "date": "2026-10-01",
+     "due": "2026-10-01",
+     "status": "void",
+     "entityId": "c8b57cf7-4330-4992-9662-1124ce4e910c",
+     "contactId": null,
+     "billingLocationId": null,
+     "locationId": "d092734b-5ec0-4b2f-bb1a-49161f94a782",
+     "po": null,
+     "salesOrder": null,
+     "subtotal": null,
+     "discount": null,
+     "shipping": null,
+     "tax": 0.0,
+     "total": 999.0,
+     "paid": null,
+     "balance": 999.0,
+     "lines": [],
+     "source": null
+    },
+    {
+     "id": "1623b159-d23f-4b23-8759-da156b9db0ad",
+     "number": "INV-3",
+     "date": "2026-10-20",
+     "due": "2026-11-19",
+     "status": "sent",
+     "entityId": "c8b57cf7-4330-4992-9662-1124ce4e910c",
+     "contactId": null,
+     "billingLocationId": null,
+     "locationId": "d092734b-5ec0-4b2f-bb1a-49161f94a782",
+     "po": null,
+     "salesOrder": null,
+     "subtotal": null,
+     "discount": null,
+     "shipping": null,
+     "tax": 16.0,
+     "total": 216.0,
+     "paid": null,
+     "balance": 216.0,
+     "lines": [
+      {
+       "item": "Gadget B",
+       "sku": null,
+       "productId": null,
+       "description": null,
+       "qty": 2.0,
+       "price": null,
+       "amount": 200.0,
+       "tax": null
+      }
+     ],
+     "source": null
+    }
+   ]
+  },
+  "customerPayments": {
+   "count": 1,
+   "updatedAt": "2026-11-17T18:25:54",
+   "rows": [
+    {
+     "id": "cbfb6fc1-bd96-445e-9ecc-61d98090d94c",
+     "number": "CP-1",
+     "date": "2026-09-20",
+     "entityId": "c8b57cf7-4330-4992-9662-1124ce4e910c",
+     "customer": "Acme Foods",
+     "invoiceId": null,
+     "invoice": "INV-1",
+     "amount": 1080.0,
+     "applied": null,
+     "unused": null,
+     "bankCharges": null,
+     "mode": null,
+     "reference": null,
+     "depositTo": null,
+     "depositToCode": null,
+     "source": null
+    }
+   ]
+  },
+  "vendorPayments": {
+   "count": 1,
+   "updatedAt": "2026-11-17T18:25:54",
+   "rows": [
+    {
+     "id": "5816d737-a6aa-44a2-9651-fa8c0a51099d",
+     "number": "VP-1",
+     "date": "2026-09-10",
+     "vendorId": "d6d2551e-7d54-4268-ad5d-c495861e9df3",
+     "vendor": "Paper Co",
+     "bill": null,
+     "amount": 120.0,
+     "mode": null,
+     "reference": null,
+     "paidThrough": null,
+     "paidThroughCode": null,
+     "source": null
+    }
+   ]
+  },
+  "expenses": {
+   "count": 1,
+   "updatedAt": "2026-11-17T18:25:54",
+   "rows": [
+    {
+     "id": "73db9c9b-65ff-4752-8839-8d2743051501",
+     "date": "2026-09-01",
+     "vendorId": null,
+     "vendor": null,
+     "account": "Office Supplies",
+     "accountCode": null,
+     "paidThrough": null,
+     "description": null,
+     "amount": null,
+     "tax": null,
+     "total": 10.0,
+     "source": null
+    }
+   ]
+  },
+  "taxJurisdictions": {
+   "count": 2,
+   "updatedAt": "2026-11-17T18:25:54",
+   "rows": [
+    {
+     "id": "16a6a4ef-f230-448f-a578-e0bb2ba31130",
+     "name": "Aurora",
+     "code": "0002",
+     "state": "CO",
+     "type": null,
+     "rate": null,
+     "collection": null,
+     "frequency": null,
+     "homeRule": false,
+     "filedThroughSuts": null,
+     "account": null,
+     "source": null
+    },
+    {
+     "id": "013fe539-7bfe-4954-b092-16f008c4bb7f",
+     "name": "Denver",
+     "code": "0004",
+     "state": "CO",
+     "type": null,
+     "rate": null,
+     "collection": null,
+     "frequency": null,
+     "homeRule": false,
+     "filedThroughSuts": null,
+     "account": null,
+     "source": null
+    }
+   ]
+  },
+  "salesTax": {
+   "count": 1,
+   "updatedAt": null,
+   "rows": [
+    {
+     "period": "2026-09",
+     "start": "2026-09-01",
+     "end": "2026-09-30",
+     "due": "2026-10-20",
+     "states": [
+      "CO"
+     ],
+     "liability": 100.0,
+     "filed": 50.0,
+     "paid": 50.0,
+     "jurisdictions": 2,
+     "matched": 1,
+     "missingReturns": 1,
+     "needsReview": 0,
+     "status": "Returns overdue",
+     "variance": -50.0
+    }
+   ],
+   "detail": {
+    "2026-09": [
+     {
+      "jurisdiction": "Aurora",
+      "code": "0002",
+      "state": "CO",
+      "method": null,
+      "frequency": "Monthly",
+      "liability": 50.0,
+      "expectedFiled": 0.0,
+      "filed": null,
+      "paid": null,
+      "variance": null,
+      "taxableSales": 0.0,
+      "status": "Return Missing",
+      "due": "2026-10-20",
+      "reviewed": false
+     },
+     {
+      "jurisdiction": "Denver",
+      "code": "0004",
+      "state": "CO",
+      "method": null,
+      "frequency": "Monthly",
+      "liability": 50.0,
+      "expectedFiled": 0.0,
+      "filed": 50.0,
+      "paid": 50.0,
+      "variance": null,
+      "taxableSales": 0.0,
+      "status": "Matched",
+      "due": "2026-10-20",
+      "reviewed": false
+     }
+    ]
+   },
+   "exceptions": [
+    {
+     "title": "Return missing",
+     "severity": "High",
+     "jurisdiction": "Aurora",
+     "period": null,
+     "amount": null,
+     "action": null
+    }
+   ],
+   "exceptionsOpen": 1
+  }
+ },
+ "reports": {
+  "kind": "unscatter-platform",
+  "version": 1,
+  "client": "CRS",
+  "asOf": "2026-10-28",
+  "generatedAt": "2026-11-17T18:25:54+00:00",
+  "modules": [
+   "sales_tax",
+   "sales",
+   "receivables",
+   "cleanup"
+  ],
+  "salesTax": {
+   "periods": [
+    {
+     "period": "2026-09",
+     "start": "2026-09-01",
+     "end": "2026-09-30",
+     "due": "2026-10-20",
+     "states": [
+      "CO"
+     ],
+     "liability": 100.0,
+     "filed": 50.0,
+     "paid": 50.0,
+     "jurisdictions": 2,
+     "matched": 1,
+     "missingReturns": 1,
+     "needsReview": 0,
+     "status": "Returns overdue",
+     "variance": -50.0
+    }
+   ],
+   "detail": {
+    "2026-09": [
+     {
+      "jurisdiction": "Aurora",
+      "code": "0002",
+      "state": "CO",
+      "method": null,
+      "frequency": "Monthly",
+      "liability": 50.0,
+      "expectedFiled": 0.0,
+      "filed": null,
+      "paid": null,
+      "variance": null,
+      "taxableSales": 0.0,
+      "status": "Return Missing",
+      "due": "2026-10-20",
+      "reviewed": false
+     },
+     {
+      "jurisdiction": "Denver",
+      "code": "0004",
+      "state": "CO",
+      "method": null,
+      "frequency": "Monthly",
+      "liability": 50.0,
+      "expectedFiled": 0.0,
+      "filed": 50.0,
+      "paid": 50.0,
+      "variance": null,
+      "taxableSales": 0.0,
+      "status": "Matched",
+      "due": "2026-10-20",
+      "reviewed": false
+     }
+    ]
+   },
+   "exceptions": [
+    {
+     "title": "Return missing",
+     "severity": "High",
+     "jurisdiction": "Aurora",
+     "period": null,
+     "amount": null,
+     "action": null
+    }
+   ],
+   "exceptionsOpen": 1,
+   "latestPeriod": "2026-09",
+   "liabilityImportedAt": null,
+   "returnsImportedAt": null
+  },
+  "sales": {
+   "months": [
+    {
+     "month": "2025-10",
+     "sales": 0.0,
+     "invoices": 0
+    },
+    {
+     "month": "2025-11",
+     "sales": 0.0,
+     "invoices": 0
+    },
+    {
+     "month": "2025-12",
+     "sales": 0.0,
+     "invoices": 0
+    },
+    {
+     "month": "2026-01",
+     "sales": 0.0,
+     "invoices": 0
+    },
+    {
+     "month": "2026-02",
+     "sales": 0.0,
+     "invoices": 0
+    },
+    {
+     "month": "2026-03",
+     "sales": 0.0,
+     "invoices": 0
+    },
+    {
+     "month": "2026-04",
+     "sales": 0.0,
+     "invoices": 0
+    },
+    {
+     "month": "2026-05",
+     "sales": 0.0,
+     "invoices": 0
+    },
+    {
+     "month": "2026-06",
+     "sales": 0.0,
+     "invoices": 0
+    },
+    {
+     "month": "2026-07",
+     "sales": 0.0,
+     "invoices": 0
+    },
+    {
+     "month": "2026-08",
+     "sales": 500.0,
+     "invoices": 1
+    },
+    {
+     "month": "2026-09",
+     "sales": 1000.0,
+     "invoices": 1
+    },
+    {
+     "month": "2026-10",
+     "sales": 200.0,
+     "invoices": 1
+    }
+   ],
+   "last12": 1700.0,
+   "byProduct": [
+    {
+     "product": "Widget A",
+     "sku": null,
+     "qty": 10.0,
+     "sales": 1000.0
+    },
+    {
+     "product": "Gadget B",
+     "sku": null,
+     "qty": 7.0,
+     "sales": 700.0
+    }
+   ],
+   "byLocation": [
+    {
+     "group": "Grocery Group",
+     "company": "Acme Foods",
+     "location": "Store #12 Denver",
+     "sales": 1700.0,
+     "invoices": 3,
+     "last": "2026-10-20"
+    }
+   ],
+   "openOrders": [
+    {
+     "number": "SO-1",
+     "date": "2026-10-15",
+     "company": "Acme Foods",
+     "location": null,
+     "amount": 300.0,
+     "status": "Open",
+     "shipment": "Pending",
+     "po": null
+    }
+   ],
+   "openOrdersCount": 1,
+   "openOrdersTotal": 300.0,
+   "invoicesImportedAt": null,
+   "ordersImportedAt": null
+  },
+  "receivables": {
+   "total": 756.0,
+   "pastDueTotal": 540.0,
+   "buckets": [
+    {
+     "key": "current",
+     "label": "Not due yet",
+     "amount": 216.0
+    },
+    {
+     "key": "1_30",
+     "label": "1\u201330 days late",
+     "amount": 0.0
+    },
+    {
+     "key": "31_60",
+     "label": "31\u201360 days late",
+     "amount": 540.0
+    },
+    {
+     "key": "61_90",
+     "label": "61\u201390 days late",
+     "amount": 0.0
+    },
+    {
+     "key": "90_plus",
+     "label": "Over 90 days late",
+     "amount": 0.0
+    }
+   ],
+   "byCompany": [
+    {
+     "group": "Grocery Group",
+     "company": "Acme Foods",
+     "total": 756.0,
+     "invoices": 2,
+     "current": 216.0,
+     "1_30": 0.0,
+     "31_60": 540.0,
+     "61_90": 0.0,
+     "90_plus": 0.0,
+     "oldestDays": 58
+    }
+   ],
+   "pastDue": [
+    {
+     "invoice": "INV-2",
+     "date": "2026-08-01",
+     "due": "2026-08-31",
+     "daysLate": 58,
+     "group": "Grocery Group",
+     "company": "Acme Foods",
+     "location": "Store #12 Denver",
+     "po": null,
+     "total": 540.0,
+     "balance": 540.0
+    }
+   ],
+   "pastDueCount": 1,
+   "invoicesImportedAt": null,
+   "paymentsImportedAt": null
+  },
+  "cleanup": {
+   "coa": {
+    "accounts": 4,
+    "issues": [
+     {
+      "account": "Office Supplies",
+      "code": "6100",
+      "type": "Expense",
+      "issue": "Very similar name to another account",
+      "detail": "Office Supply"
+     },
+     {
+      "account": "Office Supply",
+      "code": "6101",
+      "type": "Expense",
+      "issue": "Very similar name to another account",
+      "detail": "Office Supplies"
+     },
+     {
+      "account": "Travel",
+      "code": null,
+      "type": "Expense",
+      "issue": "No account number",
+      "detail": "Most accounts have one"
+     },
+     {
+      "account": "Office Supply",
+      "code": "6101",
+      "type": "Expense",
+      "issue": "No expenses in the last 12 months",
+      "detail": "Based on expenses imported into the platform; may be used by bills"
+     },
+     {
+      "account": "Travel",
+      "code": null,
+      "type": "Expense",
+      "issue": "No expenses in the last 12 months",
+      "detail": "Based on expenses imported into the platform; may be used by bills"
+     }
+    ],
+    "issueCounts": {
+     "Very similar name to another account": 2,
+     "No account number": 1,
+     "No expenses in the last 12 months": 2
+    },
+    "importedAt": null
+   },
+   "bank": null
+  }
+ }
+}

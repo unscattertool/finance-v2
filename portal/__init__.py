@@ -463,6 +463,7 @@ def create_app(instance_path=None):
 
     # -------------------------------------------------------------- the books (database)
     from . import books as B
+    from . import platformdata as PD
     from . import cash as C
     from . import tips as T
 
@@ -1144,7 +1145,7 @@ def create_app(instance_path=None):
             from . import receipts as RC
             RC.ensure(db())
             billdocs = RC.for_bills(db(), slug)
-        return render_template("client.html", c=c, s=s, show=c.get("show", {}), billdocs=billdocs, inc=inc, till=cash_till, cats=cats, card_pending=card_pending,
+        return render_template("client.html", platform_on=bool(PD.rows(app.instance_path, c, "entities") or PD.rows(app.instance_path, c, "vendors")), c=c, s=s, show=c.get("show", {}), billdocs=billdocs, inc=inc, till=cash_till, cats=cats, card_pending=card_pending,
                                proj=proj, payroll=payroll, card_watch=card_watch)
 
     def _mdy_s(iso):
@@ -1546,6 +1547,18 @@ def create_app(instance_path=None):
                         msg += " %d of them were used in %s." % (n_used, year)
                     log("coa_import", user=user, client=slug, rows=len(items), new=new)
                     flash(msg + " Review the type changes and duplicates below.", "ok")
+                elif act == "import-platform":
+                    by_source, total = PD.coa_items(app.instance_path, c)
+                    if not by_source:
+                        raise ValueError("No chart of accounts from the platform for this client yet.")
+                    new = made = 0
+                    for src, items in by_source.items():
+                        if items:
+                            new += coa.import_sources(db(), slug, src, items, user)
+                            made += coa.propose(db(), slug, src, items, user)
+                    log("coa_import_platform", user=user, client=slug, rows=total, new=new)
+                    flash("Read %d accounts from the platform (%d new); %d clean accounts proposed. Review the type changes "
+                          "and duplicates below." % (total, new, made), "ok")
                 elif act == "from-books":
                     cats, banks = coa.sources_from_books(db(), slug)
                     n1 = coa.import_sources(db(), slug, "category", cats, user)
@@ -1607,6 +1620,8 @@ def create_app(instance_path=None):
         show = request.args.get("show", "issues")
         chart = coa.accounts(db(), slug)
         return render_template("accounts.html", c=c, show=show, summ=coa.summary(db(), slug), chart=chart,
+                               platform_accounts=(PD.meta(app.instance_path, slug) or {}).get("datasets", {}).get("accounts")
+                               if PD.enabled(c) and PD.allowed(c, "accounts") else None,
                                info={a["full"]: a for a in chart}, usage_year=coa.usage_year(db(), slug),
                                maps=coa.mappings(db(), slug), iss=coa.issues(db(), slug), types=coa.TYPES,
                                editor=editor)
@@ -2099,6 +2114,23 @@ def create_app(instance_path=None):
     from . import published as PUB
     from . import bankview as BV
 
+    def platform_ingest(slug, pkg, gz, via):
+        """Store a platform data package; its summary (if any) also feeds the platform pages."""
+        with _lock:
+            meta = PD.store(app.instance_path, slug, pkg, gz, via)
+            rep = pkg.get("reports")
+            if rep and rep.get("kind") == PUB.KIND:
+                PUB.keep_previous(app.instance_path, slug)
+                rep = dict(rep, receivedAt=meta["receivedAt"])
+                _write_json(app, PUB.file_name(slug), rep)
+        return meta
+
+    def _push_auth(c):
+        token = os.environ.get(PD.token_env(c) or "", "") if c else ""
+        sent = request.headers.get("Authorization", "")
+        sent = (sent[7:] if sent.startswith("Bearer ") else sent).strip()
+        return bool(c) and PD.enabled(c) and len(token) >= 24 and hmac.compare_digest(sent, token)
+
     def platform_snapshot(slug):
         return _read_json(app, PUB.file_name(slug), None)
 
@@ -2124,7 +2156,8 @@ def create_app(instance_path=None):
             log("platform_csv", user=g.user["email"], client=c["slug"], page=page, table=a_.get("table"))
             return _csv("%s-%s-%s" % (c["slug"], a_.get("table") or page, (snap or {}).get("asOf", "")), *got)
         ctx = dict(c=c, s=snap, pages=pages, page=page, page_title=dict(pages).get(page), args=a_, bank=bank,
-                   admin=is_admin())
+                   admin=is_admin(), has_directory=bool(PD.rows(app.instance_path, c, "entities")
+                                                        or PD.rows(app.instance_path, c, "vendors")))
         if snap and page in ("sales", None) and snap.get("sales"):
             ctx["chart"] = PUB.bars_svg(snap["sales"].get("months") or [])
         if snap and page == "sales-tax" and snap.get("salesTax"):
@@ -2154,7 +2187,7 @@ def create_app(instance_path=None):
     @login_required
     def platform_module(slug, page):
         c = client_or_404(slug)
-        if c.get("source") != "platform":
+        if not PD.enabled(c):
             abort(404)
         return platform_page(c, page)
 
@@ -2182,10 +2215,7 @@ def create_app(instance_path=None):
     def platform_push(slug):
         """The Unscatter platform's "Publish to portal" button sends the client's summary here."""
         c = clients().get(slug)
-        token = os.environ.get((c or {}).get("push_token_env", ""), "")
-        sent = request.headers.get("Authorization", "")
-        sent = (sent[7:] if sent.startswith("Bearer ") else sent).strip()
-        if not c or c.get("source") != "platform" or len(token) < 24 or not hmac.compare_digest(sent, token):
+        if not _push_auth(c):
             abort(401)
         if (request.content_length or 0) > PUB.MAX_COMPRESSED:
             return jsonify(ok=False, error="too large"), 413
@@ -2200,8 +2230,114 @@ def create_app(instance_path=None):
         log("platform_publish", client=slug, modules=snap.get("modules"), asOf=snap.get("asOf"))
         return jsonify(ok=True, receivedAt=snap["receivedAt"])
 
+    @app.route("/api/<slug>/platform-data", methods=["POST"])
+    def platform_data_push(slug):
+        """The platform's "Save and send to Finance" button sends the client's clean data package here."""
+        c = clients().get(slug)
+        if not c or not PD.enabled(c):
+            return jsonify(ok=False, error="unknown client"), 404  # JSON, so the platform doesn't fall back
+        if not _push_auth(c):
+            return jsonify(ok=False, error="bad token"), 401
+        if (request.content_length or 0) > PD.MAX_COMPRESSED:
+            return jsonify(ok=False, error="too large"), 413
+        try:
+            pkg, gz = PD.parse(request.get_data(cache=False), request.headers.get("Content-Encoding"))
+        except PD.Rejected as e:
+            return jsonify(ok=False, error=str(e)), e.code
+        meta = platform_ingest(slug, pkg, gz, "push")
+        log("platform_data", client=slug, asOf=meta.get("asOf"), datasets=",".join(sorted(meta["datasets"])), bytes=meta["bytes"])
+        return jsonify(ok=True, receivedAt=meta["receivedAt"], datasets=sorted(meta["datasets"]))
+
+    def platform_pull(c, by, force=False):
+        """Load the package from the client's OneDrive Platform folder (if one is set). Returns a message or None."""
+        if not PD.graph_cfg(c):
+            return None
+        m, msg = PD.pull_onedrive(app.instance_path, c, force=force)
+        if m and m.get("via") == "onedrive" and m.get("receivedAt"):
+            pkg = PD.load(app.instance_path, c["slug"])
+            rep = (pkg or {}).get("reports")
+            if rep and rep.get("kind") == PUB.KIND and (platform_snapshot(c["slug"]) or {}).get("generatedAt") != rep.get("generatedAt"):
+                with _lock:
+                    PUB.keep_previous(app.instance_path, c["slug"])
+                    _write_json(app, PUB.file_name(c["slug"]), dict(rep, receivedAt=m["receivedAt"]))
+        log("platform_pull", user=by, client=c["slug"], ok=bool(m), msg=msg)
+        return msg
+
+    @app.route("/c/<slug>/data", methods=["GET", "POST"])
+    @login_required
+    def data_sources(slug):
+        """Admins: where each kind of data comes from for this client (the platform's clean copy or Finance's own)."""
+        c = client_or_404(slug)
+        if not is_admin():
+            abort(404)
+        if request.method == "POST":
+            if not PD.enabled(c):
+                abort(404)
+            msg = platform_pull(c, g.user["email"], force=request.form.get("force") == "1")
+            flash(msg or "No OneDrive folder is set for this client's platform data (clients.json → platform → onedrive_folder).",
+                  "ok" if msg and msg.startswith(("Loaded", "Already")) else None)
+            return redirect(url_for("data_sources", slug=slug))
+        m = PD.meta(app.instance_path, slug) if PD.enabled(c) else None
+        g_ = PD.graph_cfg(c)
+        return render_template("data.html", c=c, m=m, on=PD.enabled(c), rows=PD.sources(app.instance_path, c),
+                               folder=g_["folder"] if g_ else None, token_env=PD.token_env(c))
+
+    @app.route("/c/<slug>/directory")
+    @login_required
+    def directory_page(slug):
+        """Customers (with locations and contacts) and vendors as cleaned in the platform."""
+        c = client_or_404(slug)
+        if not PD.enabled(c):
+            abort(404)
+        customers, vendors = PD.directory(app.instance_path, c)
+        if not customers and not vendors:
+            abort(404)
+        a_ = request.args
+        q = (a_.get("q") or "").strip().lower()
+        if q:
+            def hit(*vals):
+                return any(q in (v or "").lower() for v in vals)
+            customers = [e for e in customers if hit(e.get("name"), e.get("group"), e.get("accountNumber"),
+                                                      *[x.get("name") for x in e["locations"]],
+                                                      *[x.get("city") for x in e["locations"]],
+                                                      *[x.get("name") for x in e["contacts"]])]
+            vendors = [v for v in vendors if hit(v.get("name"), v.get("company"), v.get("email"))]
+        show = a_.get("show") if a_.get("show") in ("customers", "vendors") else ("customers" if customers or not vendors else "vendors")
+        if a_.get("format") == "csv":
+            log("directory_csv", user=g.user["email"], client=slug, show=show)
+            if show == "vendors":
+                return _csv("%s-vendors" % slug, ["Vendor", "Company", "Email", "Phone", "Terms", "Active"],
+                            [[v.get("name"), v.get("company"), v.get("email"), v.get("phone"), v.get("terms"),
+                              "yes" if v.get("active", True) else "no"] for v in vendors])
+            out = []
+            for e in customers:
+                for loc in e["locations"] or [{}]:
+                    out.append([e.get("group"), e.get("name"), e.get("accountNumber"), loc.get("name"), loc.get("address1"),
+                                loc.get("city"), loc.get("state"), loc.get("zip"), loc.get("taxJurisdiction"),
+                                "; ".join("%s%s" % (x.get("name") or "", " (%s)" % x["role"] if x.get("role") else "") for x in e["contacts"]),
+                                "yes" if e.get("active", True) else "no"])
+            return _csv("%s-customers" % slug, ["Group", "Customer", "Account #", "Location", "Address", "City", "State", "ZIP",
+                                                "Tax jurisdiction", "Contacts", "Active"], out)
+        m = PD.meta(app.instance_path, slug)
+        return render_template("directory.html", c=c, customers=customers[:1000], vendors=vendors[:1000], show=show,
+                               n_customers=len(customers), n_vendors=len(vendors), q=a_.get("q", ""), m=m)
+
     # used by `manage.py sync` (daily job)
     def _daily(slug):
+        cc = dict(clients()[slug], slug=slug)
+        pull_msg = None
+        if PD.enabled(cc):
+            try:
+                pull_msg = platform_pull(cc, "daily")
+            except Exception as e:
+                app.logger.warning("platform pull failed for %s: %s", slug, e)
+                pull_msg = "Platform data pull failed (%s)." % type(e).__name__
+        out = _daily_rest(slug)
+        if pull_msg and isinstance(out, dict):
+            out = dict(out, platformData=pull_msg)
+        return out
+
+    def _daily_rest(slug):
         if clients()[slug].get("source") == "platform":  # summary is published by hand; only the bank is pulled
             c = dict(clients()[slug], slug=slug)
             err = bank_sync(c, "daily") if bank_cfg(c) else None
