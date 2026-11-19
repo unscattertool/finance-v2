@@ -28,6 +28,12 @@
   <label>One per line: name, annual salary <textarea name="salaries" rows="3" placeholder="Veronica, 50000">{{ salaries }}</textarea></label>
   <p class="hint">Added to the payroll estimate as annual ÷ 26 each pay period. A name here is left out of the Time Clock hours so it isn't counted twice.</p>
   {% endif %}
+  {% if pay_methods is not none %}
+  <strong>How each person is paid (paper check or direct deposit)</strong>
+  {% if pay_methods.gusto %}<p class="hint">From their last Gusto payroll: {% for x in pay_methods.gusto %}{{ x.name }} — {{ 'check' if x.method == 'check' else 'direct deposit' }}{{ ', ' if not loop.last }}{% endfor %}.</p>{% endif %}
+  <label>Changes, one per line: name, check <i>or</i> name, dd <textarea name="pay_methods" rows="3" placeholder="Tammy H, check">{{ pay_methods.text }}</textarea></label>
+  <p class="hint">Splits each payroll into what Gusto takes out of the bank on pay day (direct-deposit net pay + all payroll taxes) and the paper checks written by hand. Anyone not in Gusto yet counts as direct deposit unless listed here.</p>
+  {% endif %}
   <div class="actions"><button type="submit" class="primary-sm">Save</button></div>
 </form>
 {% endblock %}

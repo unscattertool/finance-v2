@@ -82,7 +82,8 @@
     {% if show.get('payroll', True) and s.payroll %}
     {% if payroll and payroll.pay_days %}{% set np = payroll.pay_days[0] %}
     <a class="tile tile-link" href="#bills"{% if np.late %} style="border-color:#F3B8B2;background:var(--redbg)"{% endif %}><div class="k">{% if np.late %}<span class="neg">Payroll not run yet · was due {{ np.pay_day|mdy }}</span>{% else %}Next payroll · {{ np.pay_day|mdy }}{% endif %}</div><div class="v {{ 'neg' if np.late }}">{{ np.total|money }}</div>
-      <div class="s">{{ 'Gusto preview' if np.gusto else 'Estimate from the Time Clock' }} · {{ np.start|mdy }} – {{ np.end|mdy }}{% if np.days_estimated and not np.gusto %} · {{ np.days_estimated }} day{{ '' if np.days_estimated == 1 else 's' }} not imported yet{% endif %}</div></a>
+      <div class="s">{{ 'Gusto preview' if np.gusto else 'Estimate from the Time Clock' }} · {{ np.start|mdy }} – {{ np.end|mdy }}{% if np.days_estimated and not np.gusto %} · {{ np.days_estimated }} day{{ '' if np.days_estimated == 1 else 's' }} not imported yet{% endif %}
+        {% if np.cost %}<br>Bank {{ np.cost.bank|money }} · paper checks {{ np.cost.checks|money }}{% endif %}{% if np.ot_hours %} · <span class="neg">{{ np.ot_hours }} OT hrs</span>{% endif %}</div></a>
     {% else %}
     <div class="tile"><div class="k">Payroll this month</div><div class="v">{{ s.payroll.monthToDate|money }}</div><div class="s">Last month {{ s.payroll.previousMonth|money }}</div></div>
     {% endif %}
@@ -186,17 +187,41 @@
               {% if payroll.last_run %}Last regular payroll ({{ payroll.last_run.pay_day|mdy }}) cost {{ payroll.last_run.total|money }}.{% endif %}
               {% if not p.salaries %}Salaries aren't included — add them in Client settings.{% endif %}</p>
             {% endif %}
+            {% if p.ot %}
+            <p class="sumline"><span class="pill late">Overtime</span> {{ p.ot_hours }} hours over 40 in a workweek (Mon–Sun) — paid at 1.5×, adds about <b>{{ p.overtime|money }}</b>{% if p.gusto %} to the Time Clock estimate (Gusto's numbers already include it){% else %} (included above){% endif %}:
+              {% for x in p.ot %}{{ x.name }} {{ x.hours }} hrs week of {{ x.week|mdy }} ({{ x.ot_hours }} OT{% if x.projected %}, partly projected{% endif %}){{ ', ' if not loop.last }}{% endfor %}.
+              <a href="{{ url_for('report', slug=c.slug, kind='hours') }}?from={{ p.start }}&to={{ p.end }}&period=custom">Hours &amp; overtime</a></p>
+            {% elif p.weeks %}<p class="hint">No overtime this pay period (nobody over 40 hours in a Mon–Sun workweek{% if p.weeks|selectattr('days_projected')|list %}, incl. projected days{% endif %}).</p>{% endif %}
+            {% if p.cost %}{% set k = p.cost %}
+            <table class="small" style="margin:6px 0">
+              <tr><th colspan="2">Cash needed to run this payroll{% if p.split_source == 'gusto' %} (from Gusto's preview){% else %} (estimate){% endif %}</th></tr>
+              <tr><td>Gross pay{% if p.overtime and not p.gusto %} (incl. overtime {{ p.overtime|money }}){% endif %}</td><td class="n">{{ k.gross|money }}</td></tr>
+              <tr><td>+ Employer payroll taxes</td><td class="n">{{ k.er_tax|money }}</td></tr>
+              {% if k.extra %}<tr><td>+ Benefits &amp; reimbursements</td><td class="n">{{ k.extra|money }}</td></tr>{% endif %}
+              <tr><td><b>Total payroll cost</b></td><td class="n"><b>{{ k.total|money }}</b></td></tr>
+              <tr><td colspan="2" class="muted">Comes out of the bank (Gusto debits) on pay day:</td></tr>
+              <tr><td>&nbsp;&nbsp;Net pay · direct deposit</td><td class="n">{{ k.net_dd|money }}</td></tr>
+              <tr><td>&nbsp;&nbsp;Payroll taxes · withheld from staff {{ k.ee_tax|money }} + employer {{ k.er_tax|money }}</td><td class="n">{{ k.taxes|money }}</td></tr>
+              {% if k.extra %}<tr><td>&nbsp;&nbsp;Benefits &amp; reimbursements</td><td class="n">{{ k.extra|money }}</td></tr>{% endif %}
+              <tr><td><b>Bank debit</b></td><td class="n"><b>{{ k.bank|money }}</b></td></tr>
+              <tr><td><b>Paper checks</b> (net pay · {% if p.check_people %}{{ p.check_people|join(', ') }}{% else %}nobody paid by check{% endif %}) — clear when cashed</td><td class="n"><b>{{ k.checks|money }}</b></td></tr>
+            </table>
+            <p class="hint">Net pay = gross − {{ '%.1f'|format(payroll.ee_rate * 100) }}% withheld from staff ({% if payroll.ee_from_gusto %}employee taxes ÷ wages paid, last 4 Gusto runs{% else %}assumed until Gusto runs are imported{% endif %}). Who's paid by check comes from their last Gusto payroll; change it in <a href="{{ url_for('client_settings', slug=c.slug) }}">Client settings</a>.</p>
+            {% endif %}
             {% if p.people %}{% set pt = p.people_totals %}
             <p class="sumline"><b>Customer card tips fund {{ pt.tips|money }} of the {{ pt.gross|money }} gross pay{% if pt.share is not none %} ({{ '%.0f'|format(pt.share * 100) }}%){% endif %}</b>;
               the business funds {{ pt.pay|money }} in hourly pay and salaries{% if p.gusto %} + {{ p.gusto.er_tax|money }} in company payroll taxes{% else %} + about {{ p.er_tax|money }} in payroll taxes{% endif %}.
               {% if not pt.tips_known %}<span class="muted">(No card tips found for this pay period yet.)</span>{% endif %}</p>
-            <table class="small"><tr><th>Team member</th><th class="n">Hourly / salary</th><th class="n">Card tips</th>{% if pt.cash_short %}<th class="n">Cash not turned in</th><th class="n">Tips to pay</th>{% endif %}<th class="n">Gross pay</th><th class="n hide-sm">Tips share</th>{% if p.gusto %}<th class="n hide-sm">Co. taxes</th><th class="n">Total cost</th>{% endif %}</tr>
-              {% for r in p.people %}<tr><td>{{ r.name }}{% if r.salaried %} <span class="muted small">salary</span>{% endif %}</td><td class="n">{{ r.pay|money }}</td><td class="n">{{ r.tips|money if r.tips else '—' }}</td>
+            <table class="small"><tr><th>Team member</th><th class="hide-sm">Paid by</th><th class="n hide-sm" title="Hours over 40 in a Mon–Sun workweek">OT hrs</th><th class="n">Hourly / salary</th><th class="n">Card tips</th>{% if pt.cash_short %}<th class="n">Cash not turned in</th><th class="n">Tips to pay</th>{% endif %}<th class="n">Gross pay</th><th class="n hide-sm">Tips share</th>{% if p.gusto %}<th class="n hide-sm">Co. taxes</th><th class="n">Total cost</th>{% endif %}</tr>
+              {% for r in p.people %}<tr><td>{{ r.name }}{% if r.salaried %} <span class="muted small">salary</span>{% endif %}</td>
+                <td class="hide-sm small">{{ 'Check' if r.method == 'check' else 'Direct deposit' }}</td>
+                <td class="n hide-sm">{% if r.ot_hours %}<span class="pill late">{{ r.ot_hours }}</span>{% endif %}</td>
+                <td class="n">{{ r.pay|money }}{% if r.ot_pay %}<br><span class="small muted">incl. OT {{ r.ot_pay|money }}</span>{% endif %}</td><td class="n">{{ r.tips|money if r.tips else '—' }}</td>
                 {% if pt.cash_short %}<td class="n {{ 'neg' if r.cash_short }}" title="{% for d, v in r.cash_short_days %}{{ d|mdy }}: {{ v|money }}&#10;{% endfor %}">{{ ('−' ~ (r.cash_short|money)) if r.cash_short else '' }}</td>
                 <td class="n {{ 'neg' if r.tips_to_pay < 0 }}">{{ r.tips_to_pay|money if (r.tips or r.cash_short) else '—' }}</td>{% endif %}
                 <td class="n">{{ r.gross|money }}</td><td class="n hide-sm muted">{{ '%.0f%%'|format(r.tips / r.gross * 100) if r.gross and r.tips else '' }}</td>
                 {% if p.gusto %}<td class="n hide-sm">{{ r.er_tax|money }}</td><td class="n">{{ r.total|money }}</td>{% endif %}</tr>{% endfor %}
-              <tr><td><b>Total</b></td><td class="n"><b>{{ pt.pay|money }}</b></td><td class="n"><b>{{ pt.tips|money }}</b></td>{% if pt.cash_short %}<td class="n neg"><b>−{{ pt.cash_short|money }}</b></td><td class="n"><b>{{ pt.tips_to_pay|money }}</b></td>{% endif %}<td class="n"><b>{{ pt.gross|money }}</b></td><td class="n hide-sm"></td>{% if p.gusto %}<td class="n hide-sm"><b>{{ p.gusto.er_tax|money }}</b></td><td class="n"><b>{{ p.gusto.total|money }}</b></td>{% endif %}</tr></table>
+              <tr><td><b>Total</b></td><td class="hide-sm"></td><td class="n hide-sm">{% if p.ot_hours %}<b>{{ p.ot_hours }}</b>{% endif %}</td><td class="n"><b>{{ pt.pay|money }}</b></td><td class="n"><b>{{ pt.tips|money }}</b></td>{% if pt.cash_short %}<td class="n neg"><b>−{{ pt.cash_short|money }}</b></td><td class="n"><b>{{ pt.tips_to_pay|money }}</b></td>{% endif %}<td class="n"><b>{{ pt.gross|money }}</b></td><td class="n hide-sm"></td>{% if p.gusto %}<td class="n hide-sm"><b>{{ p.gusto.er_tax|money }}</b></td><td class="n"><b>{{ p.gusto.total|money }}</b></td>{% endif %}</tr></table>
             <p class="hint">Card tips = what each person earned in customer card tips for {{ p.start|mdy }} – {{ p.end|mdy }} (cards they ran ± tip-outs, same rules as Card deposits &amp; tips; Veronica's and Mandy's own tips from 10/29). {% if p.gusto %}Hourly / salary = Gusto gross pay − those tips.{% else %}Hourly = Time Clock hours × each person's rate; salary = annual ÷ 26.{% endif %} Cash tips aren't in the check.{% if pt.cash_short %} <b>Cash not turned in</b> = cash the person's Shifts closeouts expected (cash sales − cash paid out) but that wasn't turned in, for the pay period; it comes off the tips to be paid (hover for the days). Gross pay above is before that deduction.{% endif %}</p>
             {% endif %}
             <form method="post" action="{{ url_for('payroll_preview', slug=c.slug) }}" class="mini" style="display:grid;gap:6px;max-width:640px">

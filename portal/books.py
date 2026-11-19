@@ -817,22 +817,29 @@ def _norm_name(n):
 
 
 def pay_rates(db, client, shifts_path=None):
-    """Hourly rate per employee (normalized name) from the POS Payroll Summary: total pay / total hours
-    (Finance's imports + Shifts'). People with no paid hours (owners, salaried) have no rate."""
+    """Hourly (straight-time) rate per employee (normalized name) from the POS Payroll Summary: regular pay / regular
+    hours, so an overtime premium never inflates the base rate (total pay / total hours when a row has no regular
+    split). Finance's imports + Shifts'. People with no paid hours (owners, salaried) have no rate."""
     tot = {}
     rows = []
+    q = "SELECT employee, reg_hours, reg_pay, total_hours, total_pay FROM pos_payroll"
     try:
-        rows += db.execute("SELECT employee, total_hours, total_pay FROM pos_payroll WHERE client=?", (client,)).fetchall()
+        rows += db.execute(q + " WHERE client=?", (client,)).fetchall()
     except sqlite3.OperationalError:
         pass
     if shifts_path and os.path.exists(shifts_path):
         try:
             s = sqlite3.connect("file:%s?mode=ro" % shifts_path, uri=True)
-            rows += s.execute("SELECT employee, total_hours, total_pay FROM pos_payroll").fetchall()
+            try:
+                rows += s.execute(q).fetchall()
+            except sqlite3.OperationalError:  # older Shifts table without the regular/OT split
+                rows += [(e, None, None, h, p) for e, h, p in s.execute("SELECT employee, total_hours, total_pay FROM pos_payroll")]
             s.close()
         except sqlite3.Error:
             pass
-    for emp, h, pay in rows:
+    for emp, rh, rp, h, pay in rows:
+        if rh and rp and rh > 0 and rp > 0:
+            h, pay = rh, rp
         k = _norm_name(emp)
         t = tot.setdefault(k, [0.0, 0.0])
         t[0] += h or 0
@@ -1008,8 +1015,16 @@ def payroll_estimate(db, client, today=None, until=None, shifts_path=None, ancho
             p["gusto"] = g_
             p["total"] = round(g_["total"], 2)
     last = runs[0] if runs else None
-    return dict(pay_days=out, rate=round(rate, 4), lag=lag, has_data=bool(wages) or bool(salaries), salaries=salaries,
-                last_run=dict(pay_day=last["pay_day"], total=round((last["gross"] or 0) + (last["er_tax"] or 0), 2)) if last else None)
+    est = dict(pay_days=out, rate=round(rate, 4), lag=lag, has_data=bool(wages) or bool(salaries), salaries=salaries,
+               last_run=dict(pay_day=last["pay_day"], total=round((last["gross"] or 0) + (last["er_tax"] or 0), 2)) if last else None)
+    # overtime (over 40 hours in a Mon–Sun workweek) and the bank / paper-check split of each pay day
+    from . import payrollcost
+    try:
+        payrollcost.enrich(db, client, est, shifts_path, today=today)
+    except Exception as e:  # noqa: BLE001 — never lose the estimate itself over the extra detail
+        import logging
+        logging.getLogger(__name__).warning("payroll cost detail failed for %s: %s", client, e)
+    return est
 
 
 def payroll_paid(db, client, period_end, pay_day):

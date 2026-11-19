@@ -759,6 +759,22 @@ def create_app(instance_path=None):
                 r.setdefault("cash_short", 0.0)
                 r["tips_to_pay"] = round(r["tips"] - r["cash_short"], 2)
             people = sorted((r for r in rows.values() if abs(r["gross"]) >= 0.005 or r["cash_short"]), key=lambda r: -r["gross"])
+            # how each is paid (check / direct deposit) and their overtime this pay period
+            from . import payrollcost as PC
+            methods = payroll.get("methods") or {}
+            ot, prem = {}, {}
+            for x in p.get("ot") or []:
+                ot[norm(x["name"])] = ot.get(norm(x["name"]), 0.0) + x["ot_hours"]
+                prem[norm(x["name"])] = prem.get(norm(x["name"]), 0.0) + x["premium"]
+            pick = lambda d, n: d.get(n) or next((v for k, v in d.items() if k.split(" ")[0] == n.split(" ")[0]), 0.0)
+            for r in people:
+                r["method"] = PC.method_of(r["name"], methods)
+                n = norm(r["name"])
+                r["ot_hours"] = round(pick(ot, n), 2)
+                if not p.get("gusto") and pick(prem, n):  # estimate: the hours are in "pay" at straight time; add the ½-time premium
+                    r["ot_pay"] = round(pick(prem, n), 2)
+                    r["pay"] = round(r["pay"] + r["ot_pay"], 2)
+                    r["gross"] = round(r["gross"] + r["ot_pay"], 2)
             g_ = round(sum(r["gross"] for r in people), 2)
             t_ = round(sum(r["tips"] for r in people), 2)
             cs_ = round(sum(r["cash_short"] for r in people), 2)
@@ -992,6 +1008,14 @@ def create_app(instance_path=None):
                     if name.strip() and v and v > 0:
                         items.append(dict(name=_txt(name, 60), annual=v))
                 B.set_salaries(db(), slug, items)
+            if "pay_methods" in request.form:  # "Name, check" / "Name, dd" per line
+                from . import payrollcost as PC
+                pm = {}
+                for line in request.form.get("pay_methods", "").splitlines()[:60]:
+                    m = re.match(r"^\s*(.*?)[,\s]+(check|paper check|paper|dd|direct deposit|direct|deposit)\s*$", line, re.I)
+                    if m and m.group(1).strip(" ,"):
+                        pm[_txt(m.group(1).strip(" ,"), 60)] = "check" if m.group(2).lower().startswith(("check", "paper")) else "dd"
+                PC.set_overrides(db(), slug, pm)
             log("client_settings", user=g.user["email"], client=slug)
             flash("Settings saved.", "ok")
             return redirect(url_for("client_settings", slug=slug))
@@ -1004,7 +1028,14 @@ def create_app(instance_path=None):
         else:
             err = "No SheetLink key on the server named %s. Add it in cPanel → Setup Python App → Environment variables." % key_env
         salaries = "\n".join("%s, %s" % (x["name"], ("%.2f" % x["annual"]).rstrip("0").rstrip(".")) for x in B.get_salaries(db(), slug)) if c.get("books") else None
-        return render_template("settings.html", c=c, key_env=key_env, accts=accts, chosen=set(b.get("accounts") or []), err=err, salaries=salaries)
+        pay_methods = None
+        if c.get("books"):
+            from . import payrollcost as PC
+            gm = PC.gusto_methods(db(), slug)
+            pay_methods = dict(text="\n".join("%s, %s" % (k, v) for k, v in PC.get_overrides(db(), slug).items()),
+                               gusto=sorted((dict(name=v[0], method=v[1]) for v in gm.values()), key=lambda x: x["name"].lower()))
+        return render_template("settings.html", c=c, key_env=key_env, accts=accts, chosen=set(b.get("accounts") or []), err=err, salaries=salaries,
+                               pay_methods=pay_methods)
 
     @app.route("/c/<slug>/export.xlsx")
     @login_required
@@ -1918,7 +1949,8 @@ def create_app(instance_path=None):
     from . import reports as R
 
     REPORTS = [("pl", "Profit & Loss"), ("balance-sheet", "Balance Sheet"), ("cash-flow", "Cash Flow"),
-               ("vendors", "Spending by Vendor"), ("sales-tax", "Sales Tax"), ("transactions", "Transactions")]
+               ("vendors", "Spending by Vendor"), ("sales-tax", "Sales Tax"), ("hours", "Hours & Overtime"),
+               ("transactions", "Transactions")]
 
     def _csv(name, header, rows):
         import csv, io
@@ -2011,6 +2043,26 @@ def create_app(instance_path=None):
                             [[r["payee"], r["category"], r["count"], r["amount"], round(r["share"], 4),
                               r["per_week"], r["per_period"], r["per_month"]] for r in data["rows"]])
             return render_template("reports.html", data=data, by=by, **ctx)
+        if kind == "hours":  # Time Clock hours per person per Mon–Sun workweek; over 40 = overtime (1.5×)
+            if not c.get("books"):
+                abort(404)
+            from . import payrollcost as PC
+            weeks = PC.weeks(db(), slug, start, end, c.get("shifts_db"), today=today, project=False)
+            methods = PC.pay_methods(db(), slug)
+            for w in weeks:
+                for x in w["people"]:
+                    x["method"] = PC.method_of(x["name"], methods)
+            tot = dict(hours=round(sum(x["hours"] for w in weeks for x in w["people"]), 2),
+                       ot_hours=round(sum(w["ot_hours"] for w in weeks), 2), premium=round(sum(w["premium"] for w in weeks), 2),
+                       ot_people=len({x["key"] for w in weeks for x in w["people"] if x["ot_hours"] > 0}), weeks=len(weeks))
+            data = dict(weeks=weeks, total=tot, show_all=a_.get("all") == "1")
+            if fmt == "csv":
+                rows = [[w["start"], w["end"], x["name"], x["hours"], round(x["hours"] - x["ot_hours"], 2), x["ot_hours"],
+                         round(x["rate"], 2), x["premium"], "yes" if x["guessed"] else "", "check" if x["method"] == "check" else "direct deposit",
+                         "" if w["complete"] else "in progress"] for w in weeks for x in w["people"]]
+                return _csv(name, ["Week start (Mon)", "Week end (Sun)", "Team member", "Hours", "Regular hours", "Overtime hours",
+                                   "Hourly rate", "Overtime premium (0.5x rate)", "Rate guessed", "Paid by", "Week"], rows)
+            return render_template("reports.html", data=data, **ctx)
         if kind == "sales-tax":
             if not c.get("books"):
                 abort(404)

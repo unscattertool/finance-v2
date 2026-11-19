@@ -2,13 +2,13 @@
 {% set kname = dict(reports)[kind] %}
 {% block title %}{{ kname }} · {{ c.name }}{% endblock %}
 {% block heading %}{{ c.name }} · Reports{% endblock %}
-{% block sub %}<p>Cash basis, from the categorized Checkbook · data updated {{ s.receivedAt|when }}</p>{% endblock %}
+{% block sub %}<p>{% if kind == 'hours' %}From the POS Time Clock (Finance and Shifts imports){% else %}Cash basis, from the categorized Checkbook{% endif %} · data updated {{ s.receivedAt|when }}</p>{% endblock %}
 {% macro amt(v) %}{% if v > -0.005 and v < 0.005 %}<span class="muted">–</span>{% else %}<span class="{{ 'neg' if v < 0 }}">{{ v|money }}</span>{% endif %}{% endmacro %}
 {% macro drill(label, extra) %}<a class="drill" href="{{ url_for('report', slug=c.slug, kind='transactions') }}{{ drill_qs(args, extra) }}">{{ label }}</a>{% endmacro %}
 {% block body %}
 <nav class="tabs no-print">
   <a href="{{ url_for('client_page', slug=c.slug) }}">← Dashboard</a>
-  {% for k, label in reports if k != 'sales-tax' or c.get('books') %}<a href="{{ url_for('report', slug=c.slug, kind=k) }}" class="{{ 'on' if k == kind }}">{{ label }}</a>{% endfor %}
+  {% for k, label in reports if k not in ('sales-tax', 'hours') or c.get('books') %}<a href="{{ url_for('report', slug=c.slug, kind=k) }}" class="{{ 'on' if k == kind }}">{{ label }}</a>{% endfor %}
 </nav>
 
 <form class="controls no-print" method="get">
@@ -162,6 +162,31 @@
     {% if c.get('books') %}<a href="{{ url_for('recurring_check', slug=c.slug) }}">Recurring payments check →</a>{% endif %}</p>
 
 {# ------------------------------------------------------------ Sales tax #}
+{% elif kind == 'hours' %}
+  {% set t = data.total %}
+  <div class="tiles" style="padding:12px 14px 0;margin-bottom:8px">
+    <div class="tile"><div class="k">Hours worked</div><div class="v">{{ t.hours }}</div><div class="s">{{ t.weeks }} workweek{{ 's' if t.weeks != 1 }} (Mon–Sun) · hourly staff</div></div>
+    <div class="tile"><div class="k">Overtime hours</div><div class="v {{ 'neg' if t.ot_hours }}">{{ t.ot_hours }}</div><div class="s">over 40 in a workweek · {{ t.ot_people }} {{ 'person' if t.ot_people == 1 else 'people' }}</div></div>
+    <div class="tile"><div class="k">Overtime premium</div><div class="v">{{ t.premium|money }}</div><div class="s">the extra ½ × rate on those hours, before payroll taxes</div></div>
+  </div>
+  <p class="sumline no-print" style="padding:0 14px">{% if data.show_all %}<a href="?{{ drill_qs(args, {'all': ''})[1:] }}">Show only people with overtime</a>{% else %}<a href="?{{ drill_qs(args, {'all': '1'})[1:] }}">Show everyone's hours</a>{% endif %}</p>
+  <div class="scroll"><table class="fin tight">
+    <tr><th>Workweek</th><th>Team member</th><th class="hide-sm">Paid by</th><th class="n">Hours</th><th class="n">Regular</th><th class="n">Overtime</th><th class="n hide-sm">Rate</th><th class="n">OT premium</th></tr>
+    {% for w in data.weeks %}
+      {% set rows = w.people if data.show_all else (w.people|selectattr('ot_hours')|list) %}
+      {% if rows %}{% for x in rows %}
+      <tr><td>{% if loop.first %}{{ w.start|mdy }} – {{ w.end|mdy }}{% if not w.complete %} <span class="pill soon">in progress</span>{% endif %}{% endif %}</td>
+        <td>{{ x.name }}</td><td class="hide-sm small">{{ 'Check' if x.method == 'check' else 'Direct deposit' }}</td>
+        <td class="n">{{ x.hours }}</td><td class="n">{{ (x.hours - x.ot_hours)|round(2) }}</td>
+        <td class="n">{% if x.ot_hours %}<span class="pill late">{{ x.ot_hours }}</span>{% else %}<span class="muted">–</span>{% endif %}</td>
+        <td class="n hide-sm">{{ x.rate|money }}{% if x.guessed %} <span class="muted small" title="No Payroll Summary rate yet: median rate">est.</span>{% endif %}</td>
+        <td class="n">{{ amt(x.premium) }}</td></tr>
+      {% endfor %}{% else %}
+      <tr><td>{{ w.start|mdy }} – {{ w.end|mdy }}{% if not w.complete %} <span class="pill soon">in progress</span>{% endif %}</td><td colspan="7" class="muted">No overtime{% if w.days_known < 7 %} ({{ w.days_known }} of 7 days imported){% endif %}</td></tr>
+      {% endif %}
+    {% endfor %}
+  </table></div>
+  <p class="hint" style="padding:0 14px">Overtime = hours over 40 in a workweek, Monday–Sunday (the same weeks as the pay periods), paid at 1.5 × the person's rate. Hours are the POS Time Clock punches (Finance's and Shifts' imports, de-duplicated); salaried people aren't listed. Rate = regular pay ÷ regular hours from the POS Payroll Summary. Weeks are shown whole even when the dates above cut through them; days not imported yet aren't counted here (the payroll estimate projects them).</p>
 {% elif kind == 'sales-tax' %}
   {% set t = data.total %}
   <div class="tiles" style="padding:12px 14px 0;margin-bottom:8px">
